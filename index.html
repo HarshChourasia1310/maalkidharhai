@@ -42,10 +42,19 @@
   #date{background:none;border:0;color:var(--muted);font-size:12px;outline:none;max-width:118px}
 
   /* tags */
+  .tagsearch{width:100%;padding:11px 12px;background:none;border:1px solid var(--rule);
+    outline:none;font-size:14px;margin-bottom:9px}
   .taggrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
-  .tagbtn{padding:10px 6px;min-height:48px;font-size:12px;line-height:1.25;text-align:left;
+  .tagbtn{display:flex;flex-direction:column;align-items:flex-start;gap:6px;
+    padding:10px 8px;min-height:66px;font-size:12px;line-height:1.2;text-align:left;
     background:none;color:var(--ink);border:1px solid var(--rule);border-left-width:3px}
   .tagbtn[aria-pressed="true"]{color:var(--paper)}
+  .tagbtn .ic{flex:none;opacity:.85}
+  .tagbtn .hint{font-size:10.5px;opacity:.75}
+  .showall{grid-column:1/-1;padding:10px;background:none;border:1px dashed var(--rule);
+    color:var(--muted);font-size:12.5px}
+  .noresult{grid-column:1/-1;color:var(--muted);font-size:13px;padding:14px 2px}
+  .row .ic{flex:none;margin-top:1px}
 
   .subs{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
   .sub{font-size:13px;padding:6px 11px;border-radius:999px;border:1px solid var(--rule);background:none;color:var(--ink)}
@@ -183,6 +192,44 @@ var TAGS = [
 var BY = {};
 TAGS.forEach(function(t){ BY[t.n] = t; });
 
+/* ---------------- icons ---------------- */
+var DOT = ' fill="currentColor" stroke="none"';
+var ICONS = {
+ "Food & drink":'<path d="M7 3v6a2 2 0 0 0 4 0V3"/><path d="M9 11v10"/><path d="M17 3c-1.3 1.5-2 3.3-2 5.3 0 1.6.7 2.6 2 2.8V21"/>',
+ "Transport":'<path d="M4.5 17v-4l2-4.6A2 2 0 0 1 8.3 7h7.4a2 2 0 0 1 1.8 1.4l2 4.6v4"/><path d="M4.5 13h15"/><circle cx="8.2" cy="17" r="1.6"/><circle cx="15.8" cy="17" r="1.6"/>',
+ "Shopping":'<path d="M5 8h14l-1.2 12H6.2L5 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
+ "Groceries":'<path d="M4 9h16l-1.6 10H5.6L4 9z"/><path d="M8 9 10.2 4"/><path d="M16 9 13.8 4"/><path d="M9.5 12.5v3M14.5 12.5v3"/>',
+ "Home":'<path d="M4 11 12 4l8 7"/><path d="M6 10v10h12V10"/><path d="M10 20v-6h4v6"/>',
+ "Entertainment":'<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M10.5 9.2 15 12l-4.5 2.8V9.2z"/>',
+ "Event":'<path d="M4 20.5h16v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6z"/><path d="M4 16.6h16"/><path d="M12 12.5V9.6"/><path d="M12 9c.9-1 .6-1.9 0-2.6-.6.7-.9 1.6 0 2.6z"/>',
+ "Travel":'<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V5.6A1.6 1.6 0 0 1 10.6 4h2.8A1.6 1.6 0 0 1 15 5.6V8"/><path d="M3 13h18"/>',
+ "Medical":'<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M12 9v6M9 12h6"/>',
+ "Personal":'<circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6"/>',
+ "Fitness":'<path d="M4 9v6M7 6.5v11M17 6.5v11M20 9v6M7 12h10"/>',
+ "Service":'<path d="M18.6 3.6 15.8 6.4l1.8 1.8 2.8-2.8a4.6 4.6 0 0 1-6 6L7.8 18a2.1 2.1 0 0 1-3-3l6.6-6.6a4.6 4.6 0 0 1 6-6z"/>',
+ "Bill":'<path d="M6 3h8l4 4v14H6V3z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/>',
+ "Subscription":'<path d="M4 10a5.5 5.5 0 0 1 5.5-5.5H19"/><path d="M16.2 1.8 19.5 4.5l-3.3 2.7"/><path d="M20 14a5.5 5.5 0 0 1-5.5 5.5H5"/><path d="M7.8 22.2 4.5 19.5l3.3-2.7"/>',
+ "Support":'<path d="M12 20s-7-4.4-7-9.1A3.9 3.9 0 0 1 12 8a3.9 3.9 0 0 1 7 2.9C19 15.6 12 20 12 20z"/>',
+ "Gift":'<rect x="3.5" y="9" width="17" height="11" rx="1.5"/><path d="M3.5 13h17"/><path d="M12 9v11"/><path d="M12 9S9.6 9.1 8.5 8a2.3 2.3 0 0 1 3.3-3.3C12.6 5.5 12 9 12 9z"/><path d="M12 9s2.4.1 3.5-1a2.3 2.3 0 0 0-3.3-3.3C11.4 5.5 12 9 12 9z"/>',
+ "Donation":'<rect x="4" y="11" width="16" height="9" rx="1.5"/><path d="M4 15h16"/><path d="M12 8.5V3"/><path d="M9.5 6 12 8.5 14.5 6"/>',
+ "Hidden charges":'<path d="M12 4 2.6 20h18.8L12 4z"/><path d="M12 10.5v4.2"/><circle cx="12" cy="17.4" r="0.95"'+DOT+'/>',
+ "Misc.":'<circle cx="5.6" cy="12" r="1.4"'+DOT+'/><circle cx="12" cy="12" r="1.4"'+DOT+'/><circle cx="18.4" cy="12" r="1.4"'+DOT+'/>',
+ "Investment":'<path d="M3 17.5 9 11l4 4 8-8"/><path d="M15 7h6v6"/>',
+ "Saving":'<ellipse cx="12" cy="6.4" rx="7" ry="2.7"/><path d="M5 6.4v5c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7v-5"/><path d="M5 11.4v5.2c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7v-5.2"/>',
+ "Self transfer":'<path d="M4 9h13"/><path d="M14 6l3 3-3 3"/><path d="M20 15H7"/><path d="M10 12l-3 3 3 3"/>',
+ "Top up":'<rect x="3" y="9" width="18" height="11" rx="2"/><path d="M3 13h18"/><path d="M15.5 16.5h2.5"/><path d="M12 2.5V7"/><path d="M9.6 4.9 12 2.5l2.4 2.4"/>',
+ "Cash withdrawal":'<rect x="3" y="4" width="18" height="9" rx="1.5"/><circle cx="12" cy="8.5" r="2"/><path d="M12 16v6"/><path d="M9.5 19.5 12 22l2.5-2.5"/>',
+ "Lent":'<circle cx="7" cy="7.6" r="3.2"/><path d="M2 19c0-3.2 2.3-4.9 5-4.9"/><path d="M12 15.5h8"/><path d="M17.2 12.7 20 15.5l-2.8 2.8"/>',
+ "Return":'<path d="M19.5 6H9.6a5 5 0 0 0 0 10H15"/><path d="M12.2 13 9.2 16l3 3"/>'
+};
+function icon(name, size){
+  var s = size || 18;
+  return '<svg class="ic" viewBox="0 0 24 24" width="'+s+'" height="'+s+'" fill="none" stroke="currentColor" '
+    + 'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    + (ICONS[name] || ICONS["Misc."]) + '</svg>';
+}
+var STARTER = ["Food & drink","Transport","Groceries","Shopping","Bill","Entertainment","Personal","Medical","Subscription"];
+
 /* ---------------- storage ---------------- */
 var KEY = "khata.entries.v1";
 var memory = null;           // fallback when localStorage is unavailable
@@ -240,6 +287,7 @@ var state = {
   tab:"add",
   draft:{ amount:"", tag:null, sub:null, note:"", date:todayISO(), id:null },
   flash:"",
+  tagQuery:"", showAllTags:false,
   ledgerMonth:null, ledgerQuery:"",
   summaryMonth:null
 };
@@ -266,7 +314,7 @@ function viewAdd(){
   var d = state.draft;
   var tag = d.tag ? BY[d.tag] : null;
   var ok = parseFloat(d.amount) > 0 && !!d.tag;
-  var recent = load().slice().sort(byNewest).slice(0,3);
+  var recent = load().slice().sort(byNewest).slice(0,5);
 
   var h = '<div class="amtline">'
     + '<span class="rs">\u20B9</span>'
@@ -274,13 +322,9 @@ function viewAdd(){
     + '<input id="date" type="date" aria-label="Date" value="'+esc(d.date)+'">'
     + '</div>';
 
-  h += '<div class="taggrid">';
-  TAGS.forEach(function(t){
-    var on = d.tag===t.n;
-    h += '<button class="tagbtn" data-tag="'+esc(t.n)+'" aria-pressed="'+on+'" style="border-left-color:'+TYPE[t.t].color
-       + (on ? ';background:'+TYPE[t.t].color+';border-color:'+TYPE[t.t].color : "") + '">'+esc(t.n)+'</button>';
-  });
-  h += '</div>';
+  h += '<input class="tagsearch" id="tagq" placeholder="Search tags or items, e.g. swiggy, fuel"'
+     + ' aria-label="Search tags" value="'+esc(state.tagQuery)+'">'
+     + '<div class="taggrid" id="taggrid">' + tagGridHTML() + '</div>';
 
   if(tag){
     h += '<p class="muted" style="font-size:13px;margin:16px 0 0">'+esc(tag.d)+'</p><div class="subs">';
@@ -300,8 +344,56 @@ function viewAdd(){
   if(state.flash) h += '<p class="flash">'+esc(state.flash)+'</p>';
 
   if(recent.length){
-    h += '<p class="small muted" style="margin:28px 0 6px">Last few. Tap one to log it again.</p>';
-    recent.forEach(function(e){ h += rowHTML(e, false, true); });
+    h += '<p class="small muted" style="margin:28px 0 6px">Recent. Tap one to log it again, \u00D7 to delete it.</p>';
+    recent.forEach(function(e){ h += rowHTML(e, true, "repeat"); });
+  }
+  return h;
+}
+
+function tagResults(){
+  var q = state.tagQuery.trim().toLowerCase();
+  var out = [];
+  if(q){
+    TAGS.forEach(function(t){
+      if(t.n.toLowerCase().indexOf(q) > -1){ out.push({t:t, sub:null}); return; }
+      t.s.filter(function(s){ return s !== "Other" && s.toLowerCase().indexOf(q) > -1; })
+         .slice(0,3).forEach(function(s){ out.push({t:t, sub:s}); });
+    });
+    return out;
+  }
+  if(state.showAllTags) return TAGS.map(function(t){ return {t:t, sub:null}; });
+
+  var count = {};
+  load().forEach(function(e){ count[e.tag] = (count[e.tag]||0) + 1; });
+  var picks = TAGS.filter(function(t){ return count[t.n]; })
+                  .sort(function(a,b){ return count[b.n] - count[a.n]; })
+                  .slice(0,9);
+  STARTER.forEach(function(n){
+    if(picks.length < 9 && BY[n] && picks.indexOf(BY[n]) < 0) picks.push(BY[n]);
+  });
+  return picks.map(function(t){ return {t:t, sub:null}; });
+}
+
+function tagGridHTML(){
+  var d = state.draft, res = tagResults(), h = "";
+  if(!res.length){
+    return '<p class="noresult">No tag matches that. Try a shorter word, or open the full list.</p>'
+      + '<button class="showall" data-showall="1">Show all 26 tags</button>';
+  }
+  res.forEach(function(r){
+    var t = r.t, on = d.tag===t.n && (r.sub ? d.sub===r.sub : true);
+    h += '<button class="tagbtn" data-tag="'+esc(t.n)+'"'
+       + (r.sub ? ' data-picksub="'+esc(r.sub)+'"' : '')
+       + ' aria-pressed="'+on+'" style="border-left-color:'+TYPE[t.t].color
+       + (on ? ';background:'+TYPE[t.t].color+';border-color:'+TYPE[t.t].color : "") + '">'
+       + icon(t.n)
+       + '<span>'+esc(r.sub || t.n)+'</span>'
+       + (r.sub ? '<span class="hint">'+esc(t.n)+'</span>' : '')
+       + '</button>';
+  });
+  if(!state.tagQuery.trim()){
+    h += '<button class="showall" data-showall="1">'
+       + (state.showAllTags ? "Show fewer" : "Show all 26 tags") + '</button>';
   }
   return h;
 }
@@ -317,12 +409,18 @@ function commitDraft(){
     });
     state.flash = "Entry updated.";
   }else{
+    var twin = list.filter(function(e){
+      return e.date===d.date && e.amount===amt && e.tag===d.tag;
+    })[0];
+    if(twin && !confirm("You already logged " + money(amt) + " to " + d.tag
+        + " on this date. Add it a second time?")) return;
     list.push({ id:Date.now()+"-"+Math.random().toString(36).slice(2,7),
                 date:d.date, amount:amt, tag:d.tag, sub:d.sub||"", note:d.note.trim() });
     state.flash = money(amt)+" logged to "+d.tag+".";
   }
   save(list);
   state.draft = { amount:"", tag:null, sub:null, note:"", date:todayISO(), id:null };
+  state.tagQuery = ""; state.showAllTags = false;
   render();
   setTimeout(function(){ if(state.flash){ state.flash=""; if(state.tab==="add") render(); } }, 2600);
 }
@@ -332,12 +430,14 @@ function byNewest(a,b){
   if(a.date!==b.date) return a.date<b.date ? 1 : -1;
   return a.id<b.id ? 1 : -1;
 }
-function rowHTML(e, killable, repeatable){
-  var t = BY[e.tag] || {t:"spend"};
+function rowHTML(e, killable, act){
+  var t = BY[e.tag] || {t:"spend", n:"Misc."};
   var sign = t.t==="in" ? "+" : "";
-  return '<div class="row"'+(repeatable?' data-repeat="'+esc(e.id)+'"':'')+'>'
-    + '<div class="spine" style="background:'+TYPE[t.t].color+'"></div>'
-    + '<div class="body"'+(killable?' data-edit="'+esc(e.id)+'"':'')+'>'
+  var tap = act==="repeat" ? ' data-repeat="'+esc(e.id)+'"'
+          : act==="edit"   ? ' data-edit="'+esc(e.id)+'"' : "";
+  return '<div class="row">'
+    + '<span style="color:'+TYPE[t.t].color+'">'+icon(e.tag, 19)+'</span>'
+    + '<div class="body"'+tap+'>'
     +   '<div class="what">'+esc(e.note || e.sub || e.tag)+'</div>'
     +   '<div class="meta">'+esc(e.tag)+(e.sub?" \u00B7 "+esc(e.sub):"")+'</div>'
     + '</div>'
@@ -384,7 +484,7 @@ function viewLedger(){
       },0);
       h += '<div class="dayhead"><span>'+dayLabel(e.date)+'</span><span class="mono">'+money(dayTotal)+'</span></div>';
     }
-    h += rowHTML(e, true, false);
+    h += rowHTML(e, true, "edit");
   });
   return h;
 }
@@ -538,10 +638,19 @@ document.addEventListener("click", function(ev){
   var b;
 
   if((b = ev.target.closest("nav button"))){ state.tab = b.dataset.tab; state.flash=""; render(); return; }
+  if((b = ev.target.closest("[data-showall]"))){
+    state.showAllTags = !state.showAllTags;
+    var g0 = el("taggrid"); if(g0) g0.innerHTML = tagGridHTML();
+    return;
+  }
   if((b = ev.target.closest("[data-tag]"))){
-    var name = b.dataset.tag;
-    state.draft.tag = state.draft.tag===name ? null : name;
-    state.draft.sub = null; render(); return;
+    var name = b.dataset.tag, ps = b.dataset.picksub || null;
+    if(state.draft.tag===name && (!ps || state.draft.sub===ps)){
+      state.draft.tag = null; state.draft.sub = null;
+    }else{
+      state.draft.tag = name; state.draft.sub = ps;
+    }
+    render(); return;
   }
   if((b = ev.target.closest("[data-sub]"))){
     var s = b.dataset.sub;
@@ -630,6 +739,10 @@ document.addEventListener("input", function(ev){
   }
   else if(t.id==="date"){ state.draft.date = t.value || todayISO(); }
   else if(t.id==="note"){ state.draft.note = t.value; }
+  else if(t.id==="tagq"){
+    state.tagQuery = t.value;
+    var g = el("taggrid"); if(g) g.innerHTML = tagGridHTML();
+  }
   else if(t.id==="q"){ state.ledgerQuery = t.value; var pos=t.selectionStart; render(); var q2=el("q"); if(q2){ q2.focus(); q2.setSelectionRange(pos,pos); } }
 });
 
