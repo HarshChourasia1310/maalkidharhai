@@ -73,6 +73,18 @@
   .row .meta{font-size:11px;color:var(--muted);margin-top:1px}
   .row .amt{font-family:var(--mono);font-size:14px;white-space:nowrap}
   .row .kill{background:none;border:0;color:var(--muted);font-size:19px;line-height:1;padding:0 2px}
+  .row .more{background:none;border:0;color:var(--muted);padding:2px 4px;line-height:1;align-self:center}
+  .toolbar{display:flex;justify-content:flex-end;gap:14px;margin:-10px 0 12px}
+  .linkbtn{background:none;border:0;color:var(--muted);font-size:12.5px;padding:5px 0;text-decoration:underline}
+  .flashbar{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    background:var(--band);padding:10px 12px;margin-bottom:14px;font-size:13px}
+  .flashbar .undo{background:none;border:0;color:var(--ink);font-size:13px;text-decoration:underline;padding:0}
+  .menu{display:flex;flex-direction:column;gap:2px;margin-top:10px}
+  .menu button{display:flex;align-items:center;gap:12px;padding:15px 4px;background:none;border:0;
+    border-bottom:1px solid var(--band);color:var(--ink);font-size:15px;text-align:left}
+  .menu button:last-child{border-bottom:0}
+  .menu .danger{color:var(--spend)}
+  .menuhead{font-size:13px;color:var(--muted);padding-bottom:2px}
 
   .dayhead{display:flex;justify-content:space-between;align-items:baseline;
     border-bottom:1px solid var(--rule);padding-bottom:4px;margin:22px 0 2px;font-size:12px;color:var(--muted)}
@@ -235,6 +247,17 @@ function icon(name, size){
     + 'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
     + (ICONS[name] || ICONS["Misc."]) + '</svg>';
 }
+var UI = {
+  more:'<circle cx="12" cy="5.2" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="18.8" r="1.5" fill="currentColor" stroke="none"/>',
+  edit:'<path d="M4.5 19.5h4L20 8 16 4 4.5 15.5v4z"/><path d="M14.5 5.5 18.5 9.5"/>',
+  trash:'<path d="M4 7h16"/><path d="M9.5 7V5.2A1.2 1.2 0 0 1 10.7 4h2.6a1.2 1.2 0 0 1 1.2 1.2V7"/><path d="M6.5 7 7.6 20h8.8L17.5 7"/><path d="M10.2 11v5.5M13.8 11v5.5"/>',
+  again:'<path d="M4 10a5.5 5.5 0 0 1 5.5-5.5H19"/><path d="M16.2 1.8 19.5 4.5l-3.3 2.7"/><path d="M20 14a5.5 5.5 0 0 1-5.5 5.5H5"/><path d="M7.8 22.2 4.5 19.5l3.3-2.7"/>'
+};
+function ui(name, size){
+  var z = size || 19;
+  return '<svg viewBox="0 0 24 24" width="'+z+'" height="'+z+'" fill="none" stroke="currentColor" '
+    + 'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+UI[name]+'</svg>';
+}
 var STARTER = ["Food & drink","Transport","Groceries","Shopping","Bill","Entertainment","Personal","Medical","Subscription"];
 
 /* ---------------- storage ---------------- */
@@ -298,7 +321,7 @@ function subLabel(e){ return subsOf(e).join(" \u00B7 "); }
 var state = {
   tab:"add",
   draft:{ amount:"", tag:null, subs:[], note:"", date:todayISO(), id:null },
-  flash:"",
+  flash:"", undo:null,
   tagQuery:"", showAllTags:false, openTag:null,
   ledgerMonth:null, ledgerQuery:"",
   summaryMonth:null
@@ -309,6 +332,11 @@ function render(){
   var warn = storageBroken
     ? '<div class="warn">This browser is blocking storage, so entries will vanish when you close the tab. Open the page over https (your GitHub Pages link) rather than as a local file.</div>'
     : "";
+  var fl = state.flash
+    ? '<div class="flashbar"><span>'+esc(state.flash)+'</span>'
+      + (state.undo ? '<button class="undo" data-undo="1">Undo</button>' : '') + '</div>'
+    : "";
+  warn = warn + fl;
   if(state.tab==="add")         v.innerHTML = warn + viewAdd();
   else if(state.tab==="ledger") v.innerHTML = warn + viewLedger();
   else if(state.tab==="month")  v.innerHTML = warn + viewMonth();
@@ -334,6 +362,11 @@ function viewAdd(){
     + '<input id="date" type="date" aria-label="Date" value="'+esc(d.date)+'">'
     + '</div>';
 
+  if(d.amount || d.tag || d.note || d.id){
+    h += '<div class="toolbar">'
+       + (d.id ? '<button class="linkbtn" id="cancelEdit">Cancel edit</button>' : '')
+       + '<button class="linkbtn" id="clearAll">Clear</button></div>';
+  }
   h += '<input class="tagsearch" id="tagq" placeholder="Search tags or items, e.g. swiggy, fuel"'
      + ' aria-label="Search tags" value="'+esc(state.tagQuery)+'">'
      + '<div class="taggrid" id="taggrid">' + tagGridHTML() + '</div>';
@@ -353,8 +386,6 @@ function viewAdd(){
            : "Enter an amount and pick a tag")
      + '</button>';
 
-  if(d.id) h += '<button class="ghost" id="cancelEdit" style="width:100%;margin-top:8px">Cancel edit</button>';
-  if(state.flash) h += '<p class="flash">'+esc(state.flash)+'</p>';
 
   if(recent.length){
     h += '<p class="small muted" style="margin:28px 0 6px">Recent. Tap one to log it again, \u00D7 to delete it.</p>';
@@ -455,7 +486,7 @@ function rowHTML(e, killable, act){
     +   '<div class="meta">'+esc(e.tag)+(subLabel(e)?" \u00B7 "+esc(subLabel(e)):"")+'</div>'
     + '</div>'
     + '<div class="amt"'+(t.t==="in"?' style="color:var(--saved)"':'')+'>'+sign+money(e.amount)+'</div>'
-    + (killable ? '<button class="kill" data-kill="'+esc(e.id)+'" aria-label="Delete entry">\u00D7</button>' : '')
+    + (killable ? '<button class="more" data-more="'+esc(e.id)+'" aria-label="Options for this entry">'+ui("more",18)+'</button>' : '')
     + '</div>';
 }
 
@@ -681,11 +712,67 @@ function openSheet(title, body, opts){
   if(!opts.editable){ ta.focus(); ta.select(); }
 }
 
+function openMenu(id){
+  var e = load().filter(function(x){ return x.id===id; })[0];
+  if(!e) return;
+  var t = BY[e.tag] || {t:"spend"};
+  var veil = document.createElement("div");
+  veil.className = "veil";
+  veil.innerHTML = '<div class="sheet">'
+    + '<div class="sheethead"><h2>'+esc(e.note || subLabel(e) || e.tag)+' \u2014 '+money(e.amount)+'</h2>'
+    + '<button class="kill" data-close="1" aria-label="Close" style="font-size:22px">\u00D7</button></div>'
+    + '<p class="menuhead">'+esc(e.tag)+(subLabel(e)?" \u00B7 "+esc(subLabel(e)):"")+' \u00B7 '+esc(dayLabel(e.date))+'</p>'
+    + '<div class="menu">'
+    +   '<button data-mact="edit">'+ui("edit")+'Edit this entry</button>'
+    +   '<button data-mact="repeat">'+ui("again")+'Log it again today</button>'
+    +   '<button class="danger" data-mact="delete">'+ui("trash")+'Delete</button>'
+    + '</div></div>';
+  document.body.appendChild(veil);
+  veil.addEventListener("click", function(ev){
+    if(ev.target===veil || ev.target.closest("[data-close]")){ veil.remove(); return; }
+    var b = ev.target.closest("[data-mact]");
+    if(!b) return;
+    var act = b.dataset.mact;
+    veil.remove();
+    if(act==="edit"){
+      state.draft = { amount:String(e.amount), tag:e.tag, subs:subsOf(e), note:e.note||"", date:e.date, id:e.id };
+      state.tab = "add"; state.flash = ""; state.undo = null; render();
+    }else if(act==="repeat"){
+      state.draft = { amount:String(e.amount), tag:e.tag, subs:subsOf(e), note:e.note||"", date:todayISO(), id:null };
+      state.tab = "add"; state.flash = ""; state.undo = null; render();
+    }else if(act==="delete"){
+      deleteEntry(e.id);
+    }
+  });
+}
+
+function deleteEntry(id){
+  var list = load(), at = -1;
+  list.forEach(function(e,i){ if(e.id===id) at = i; });
+  if(at < 0) return;
+  var gone = list[at];
+  state.undo = { entry:gone, at:at };
+  state.flash = "Deleted " + (gone.note || subLabel(gone) || gone.tag) + ".";
+  list.splice(at,1);
+  save(list);
+  render();
+  setTimeout(function(){
+    if(state.undo && state.undo.entry.id===id){
+      state.undo = null; state.flash = "";
+      var fb = document.querySelector(".flashbar"); if(fb) fb.remove();
+    }
+  }, 8000);
+}
+
 /* ---------------- events ---------------- */
 document.addEventListener("click", function(ev){
   var b;
 
-  if((b = ev.target.closest("nav button"))){ state.tab = b.dataset.tab; state.flash=""; render(); return; }
+  if((b = ev.target.closest("nav button"))){
+    state.tab = b.dataset.tab;
+    if(!state.undo) state.flash = "";
+    render(); return;
+  }
   if((b = ev.target.closest("[data-showall]"))){
     state.showAllTags = !state.showAllTags;
     var g0 = el("taggrid"); if(g0) g0.innerHTML = tagGridHTML();
@@ -707,7 +794,8 @@ document.addEventListener("click", function(ev){
   }
   if(ev.target.closest("#saveBtn")){ commitDraft(); return; }
   if(ev.target.closest("#cancelEdit")){
-    state.draft = { amount:"", tag:null, subs:[], note:"", date:todayISO(), id:null }; render(); return;
+    state.draft = { amount:"", tag:null, subs:[], note:"", date:todayISO(), id:null };
+    state.tagQuery = ""; render(); return;
   }
   if((b = ev.target.closest("[data-lm]"))){ state.ledgerMonth = b.dataset.lm; render(); return; }
   if((b = ev.target.closest("[data-sm]"))){ state.summaryMonth = b.dataset.sm; state.openTag = null; render(); return; }
@@ -716,9 +804,21 @@ document.addEventListener("click", function(ev){
     render(); return;
   }
 
-  if((b = ev.target.closest("[data-kill]"))){
-    var id = b.dataset.kill;
-    save(load().filter(function(e){ return e.id!==id; }));
+  if((b = ev.target.closest("[data-more]"))){ openMenu(b.dataset.more); return; }
+  if(ev.target.closest("[data-undo]")){
+    if(state.undo){
+      var list = load();
+      list.splice(Math.min(state.undo.at, list.length), 0, state.undo.entry);
+      save(list);
+      state.undo = null; state.flash = "Restored.";
+      render();
+      setTimeout(function(){ state.flash=""; var fb=document.querySelector(".flashbar"); if(fb) fb.remove(); }, 2500);
+    }
+    return;
+  }
+  if(ev.target.closest("#clearAll")){
+    state.draft = { amount:"", tag:null, subs:[], note:"", date:todayISO(), id:null };
+    state.tagQuery = ""; state.showAllTags = false; state.flash = ""; state.undo = null;
     render(); return;
   }
   if((b = ev.target.closest("[data-edit]"))){
