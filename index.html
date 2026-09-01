@@ -86,7 +86,9 @@
   .menu .danger{color:var(--spend)}
   .menuhead{font-size:13px;color:var(--muted);padding-bottom:2px}
   .lentrow{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--band)}
-  .lentrow .who{flex:1;min-width:0}
+  .lentrow .who{flex:1;min-width:0;display:block;text-align:left;background:none;border:0;color:inherit;padding:0}
+  .lentrow .who .nm{display:block}
+  .lentrow .who .bits{display:block}
   .lentrow .who .nm{font-size:15px;word-break:break-word}
   .lentrow .who .bits{font-size:11.5px;color:var(--muted);margin-top:2px}
   .lentrow .out{font-family:var(--mono);font-size:15px;white-space:nowrap}
@@ -325,7 +327,7 @@ var state = {
   tab:"add",
   draft:{ amount:"", tag:null, subs:[], note:"", date:todayISO(), id:null },
   flash:"", undo:null,
-  tagQuery:"", showAllTags:false, openTag:null,
+  tagQuery:"", showAllTags:false, openTag:null, openPerson:null,
   ledgerMonth:null, ledgerQuery:"",
   summaryMonth:null
 };
@@ -647,12 +649,19 @@ function viewMonth(){
   });
 
   if(s.otherTags.length){
-    h += '<p class="small muted" style="margin:26px 0 6px">Money that moved but was not spent</p>';
+    h += '<p class="small muted" style="margin:26px 0 6px">Money that moved but was not spent. Tap to break it down.</p>';
     s.otherTags.forEach(function(p){
-      var t = (BY[p[0]]||{t:"moved"}).t;
-      h += '<div class="row"><div class="spine" style="background:'+TYPE[t].color+'"></div>'
-        + '<div class="body"><div class="what">'+esc(p[0])+'</div><div class="meta">'+TYPE[t].label+'</div></div>'
-        + '<div class="amt">'+money(p[1])+'</div></div>';
+      var t = (BY[p[0]]||{t:"moved"}).t, open = state.openTag===p[0];
+      h += '<div><button class="bartap" data-expand="'+esc(p[0])+'" aria-expanded="'+open+'">'
+        + '<span class="row" style="border-bottom:1px solid var(--band)">'
+        +   '<span style="color:'+TYPE[t].color+'">'+icon(p[0],19)+'</span>'
+        +   '<span class="body"><span class="what">'+esc(p[0])
+        +     '<span class="caret">'+(open?"\u25B4":"\u25BE")+'</span></span>'
+        +     '<span class="meta" style="display:block">'+TYPE[t].label+'</span></span>'
+        +   '<span class="amt">'+money(p[1])+'</span>'
+        + '</span></button>'
+        + (open ? breakdownHTML(p[0], m) : "")
+        + '</div>';
     });
   }
 
@@ -712,6 +721,27 @@ function lentBook(){
   };
 }
 
+function personHTML(r){
+  var key = r.name.toLowerCase();
+  var rows = load().filter(function(e){
+    var mine = e.tag==="Lent" || (e.tag==="Return" && subsOf(e).indexOf("Repaid to me") > -1);
+    return mine && personOf(e).toLowerCase() === key;
+  }).sort(byNewest);
+
+  var h = '<div class="bd">';
+  h += '<p class="cmp">'+money(r.out)+' lent \u00B7 '+money(r.back)+' returned \u00B7 '
+     + '<strong>'+money(Math.round(r.due))+' still to come back</strong></p>';
+  h += '<h4>Every movement</h4>';
+  rows.forEach(function(e){
+    var back = e.tag==="Return";
+    h += '<div class="en"><span class="n">'+esc(dayLabel(e.date))+' \u00B7 '
+       + (back ? "returned" : "lent") + (subLabel(e) && !back ? " ("+esc(subLabel(e))+")" : "")
+       + '</span><span class="mono"'+(back?' style="color:var(--saved)"':'')+'>'
+       + (back?"+":"\u2212") + money(e.amount) + '</span></div>';
+  });
+  return h + '</div>';
+}
+
 function viewLent(){
   var b = lentBook();
   var h = '<div class="headline"><div class="big">'+money(Math.round(b.total))+'</div>'
@@ -725,11 +755,17 @@ function viewLent(){
 
   if(b.open.length){
     b.open.forEach(function(r){
-      h += '<div class="lentrow"><div class="who"><div class="nm">'+esc(r.name)+'</div>'
-        + '<div class="bits">lent '+money(r.out)+(r.back?' \u00B7 back '+money(r.back):'')
-        + ' \u00B7 '+r.n+' time'+(r.n===1?'':'s')+'</div></div>'
+      var open = state.openPerson === r.name.toLowerCase();
+      h += '<div><div class="lentrow">'
+        + '<button class="who" data-person="'+esc(r.name)+'" aria-expanded="'+open+'">'
+        +   '<span class="nm">'+esc(r.name)+'<span class="caret">'+(open?"\u25B4":"\u25BE")+'</span></span>'
+        +   '<span class="bits">'+ (r.back
+              ? 'lent '+money(r.out)+', '+money(r.back)+' back, '+money(Math.round(r.due))+' still out'
+              : 'lent '+money(r.out)+' over '+r.n+' time'+(r.n===1?'':'s')+', nothing back yet')
+        +   '</span></button>'
         + '<div class="out">'+money(Math.round(r.due))+'</div>'
-        + '<button class="settle" data-settle="'+esc(r.name)+'">Got it back</button></div>';
+        + '<button class="settle" data-settle="'+esc(r.name)+'">Got it back</button></div>'
+        + (open ? personHTML(r) : "") + '</div>';
     });
   }else{
     h += '<p class="empty" style="padding:10px 0">Everything you lent has come back.</p>';
@@ -739,7 +775,7 @@ function viewLent(){
     h += '<p class="small muted" style="margin:24px 0 4px">Settled</p>';
     b.settled.forEach(function(r){
       h += '<div class="lentrow"><div class="who"><div class="nm">'+esc(r.name)+'</div>'
-        + '<div class="bits">lent '+money(r.out)+' \u00B7 all returned</div></div></div>';
+        + '<div class="bits">lent '+money(r.out)+', all '+money(r.back)+' returned</div></div></div>';
     });
   }
 
@@ -915,6 +951,11 @@ document.addEventListener("click", function(ev){
       setTimeout(function(){ state.flash=""; var fb=document.querySelector(".flashbar"); if(fb) fb.remove(); }, 2500);
     }
     return;
+  }
+  if((b = ev.target.closest("[data-person]"))){
+    var k = b.dataset.person.toLowerCase();
+    state.openPerson = state.openPerson===k ? null : k;
+    render(); return;
   }
   if((b = ev.target.closest("[data-settle]"))){
     var who = b.dataset.settle, bk = lentBook();
