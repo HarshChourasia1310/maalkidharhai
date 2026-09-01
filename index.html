@@ -87,6 +87,13 @@
   .headline .sub{font-size:13px;color:var(--muted);margin-top:5px}
 
   .bar{margin-bottom:12px}
+  .bartap{display:block;width:100%;padding:0;background:none;border:0;color:inherit;text-align:left}
+  .bartap .caret{color:var(--muted);font-size:11px;margin-left:5px}
+  .bd{border-left:2px solid var(--band);padding-left:11px;margin:10px 0 16px}
+  .bd .sr{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:4px 0}
+  .bd .sr .n{min-width:0;word-break:break-word}
+  .bd .en{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--muted);padding:3px 0}
+  .bd h4{margin:12px 0 2px;font:500 11.5px/1.3 inherit;color:var(--muted);letter-spacing:.03em;text-transform:uppercase}
   .bar .t{display:flex;justify-content:space-between;align-items:baseline;font-size:14px}
   .bar .track{height:6px;background:var(--band);margin-top:5px}
   .bar .fill{height:100%;background:var(--spend)}
@@ -281,13 +288,18 @@ function months(list){
   return Object.keys(set).sort().reverse();
 }
 function el(id){ return document.getElementById(id); }
+function subsOf(e){
+  if(Array.isArray(e.sub)) return e.sub.filter(Boolean);
+  return e.sub ? [e.sub] : [];
+}
+function subLabel(e){ return subsOf(e).join(" \u00B7 "); }
 
 /* ---------------- state ---------------- */
 var state = {
   tab:"add",
-  draft:{ amount:"", tag:null, sub:null, note:"", date:todayISO(), id:null },
+  draft:{ amount:"", tag:null, subs:[], note:"", date:todayISO(), id:null },
   flash:"",
-  tagQuery:"", showAllTags:false,
+  tagQuery:"", showAllTags:false, openTag:null,
   ledgerMonth:null, ledgerQuery:"",
   summaryMonth:null
 };
@@ -327,9 +339,10 @@ function viewAdd(){
      + '<div class="taggrid" id="taggrid">' + tagGridHTML() + '</div>';
 
   if(tag){
-    h += '<p class="muted" style="font-size:13px;margin:16px 0 0">'+esc(tag.d)+'</p><div class="subs">';
+    h += '<p class="muted" style="font-size:13px;margin:16px 0 0">'+esc(tag.d)+'</p>'
+       + '<p class="small muted" style="margin:6px 0 0">Pick as many as apply.</p><div class="subs">';
     tag.s.forEach(function(s){
-      h += '<button class="sub" data-sub="'+esc(s)+'" aria-pressed="'+(d.sub===s)+'">'+esc(s)+'</button>';
+      h += '<button class="sub" data-sub="'+esc(s)+'" aria-pressed="'+(d.subs.indexOf(s)>-1)+'">'+esc(s)+'</button>';
     });
     h += '</div>';
     h += '<input id="note" placeholder="What was it? e.g. chicken biryani, Amanora" aria-label="Item" value="'+esc(d.note)+'">';
@@ -381,7 +394,7 @@ function tagGridHTML(){
       + '<button class="showall" data-showall="1">Show all 26 tags</button>';
   }
   res.forEach(function(r){
-    var t = r.t, on = d.tag===t.n && (r.sub ? d.sub===r.sub : true);
+    var t = r.t, on = d.tag===t.n && (r.sub ? d.subs.indexOf(r.sub)>-1 : true);
     h += '<button class="tagbtn" data-tag="'+esc(t.n)+'"'
        + (r.sub ? ' data-picksub="'+esc(r.sub)+'"' : '')
        + ' aria-pressed="'+on+'" style="border-left-color:'+TYPE[t.t].color
@@ -405,7 +418,7 @@ function commitDraft(){
   var list = load();
   if(d.id){
     list = list.map(function(e){
-      return e.id===d.id ? {id:e.id, date:d.date, amount:amt, tag:d.tag, sub:d.sub||"", note:d.note.trim()} : e;
+      return e.id===d.id ? {id:e.id, date:d.date, amount:amt, tag:d.tag, sub:d.subs.slice(), note:d.note.trim()} : e;
     });
     state.flash = "Entry updated.";
   }else{
@@ -415,11 +428,11 @@ function commitDraft(){
     if(twin && !confirm("You already logged " + money(amt) + " to " + d.tag
         + " on this date. Add it a second time?")) return;
     list.push({ id:Date.now()+"-"+Math.random().toString(36).slice(2,7),
-                date:d.date, amount:amt, tag:d.tag, sub:d.sub||"", note:d.note.trim() });
+                date:d.date, amount:amt, tag:d.tag, sub:d.subs.slice(), note:d.note.trim() });
     state.flash = money(amt)+" logged to "+d.tag+".";
   }
   save(list);
-  state.draft = { amount:"", tag:null, sub:null, note:"", date:todayISO(), id:null };
+  state.draft = { amount:"", tag:null, subs:[], note:"", date:todayISO(), id:null };
   state.tagQuery = ""; state.showAllTags = false;
   render();
   setTimeout(function(){ if(state.flash){ state.flash=""; if(state.tab==="add") render(); } }, 2600);
@@ -438,8 +451,8 @@ function rowHTML(e, killable, act){
   return '<div class="row">'
     + '<span style="color:'+TYPE[t.t].color+'">'+icon(e.tag, 19)+'</span>'
     + '<div class="body"'+tap+'>'
-    +   '<div class="what">'+esc(e.note || e.sub || e.tag)+'</div>'
-    +   '<div class="meta">'+esc(e.tag)+(e.sub?" \u00B7 "+esc(e.sub):"")+'</div>'
+    +   '<div class="what">'+esc(e.note || subLabel(e) || e.tag)+'</div>'
+    +   '<div class="meta">'+esc(e.tag)+(subLabel(e)?" \u00B7 "+esc(subLabel(e)):"")+'</div>'
     + '</div>'
     + '<div class="amt"'+(t.t==="in"?' style="color:var(--saved)"':'')+'>'+sign+money(e.amount)+'</div>'
     + (killable ? '<button class="kill" data-kill="'+esc(e.id)+'" aria-label="Delete entry">\u00D7</button>' : '')
@@ -464,7 +477,7 @@ function viewLedger(){
   var rows = all.filter(function(e){ return ym(e.date)===m; })
     .filter(function(e){
       if(!q) return true;
-      return (e.tag+" "+e.sub+" "+e.note).toLowerCase().indexOf(q) > -1;
+      return (e.tag+" "+subsOf(e).join(" ")+" "+e.note).toLowerCase().indexOf(q) > -1;
     }).sort(byNewest);
 
   var h = monthTabs(m,"lm")
@@ -510,6 +523,35 @@ function summarise(m){
            total:byType.spend, days:Object.keys(days).length };
 }
 
+function breakdownHTML(tagName, m){
+  var rows = load().filter(function(e){ return ym(e.date)===m && e.tag===tagName; });
+  var totals = {}, multi = false;
+  rows.forEach(function(e){
+    var subs = subsOf(e);
+    if(subs.length > 1) multi = true;
+    if(!subs.length) subs = ["Not specified"];
+    var share = e.amount / subs.length;
+    subs.forEach(function(sname){ totals[sname] = (totals[sname]||0) + share; });
+  });
+  var ordered = Object.keys(totals).map(function(k){ return [k, totals[k]]; })
+                      .sort(function(a,b){ return b[1]-a[1]; });
+
+  var h = '<div class="bd"><h4>By sub-tag</h4>';
+  ordered.forEach(function(p){
+    h += '<div class="sr"><span class="n">'+esc(p[0])+'</span>'
+       + '<span class="mono">'+money(Math.round(p[1]))+'</span></div>';
+  });
+  if(multi) h += '<p class="small muted" style="margin:6px 0 0">Entries carrying several sub-tags are split evenly between them.</p>';
+
+  h += '<h4>Entries</h4>';
+  rows.slice().sort(byNewest).forEach(function(e){
+    h += '<div class="en"><span class="n">'+esc(dayLabel(e.date))+' \u00B7 '
+       + esc(e.note || subLabel(e) || "no note")+'</span>'
+       + '<span class="mono">'+money(e.amount)+'</span></div>';
+  });
+  return h + '</div>';
+}
+
 function viewMonth(){
   var m = state.summaryMonth || months(load())[0];
   state.summaryMonth = m;
@@ -518,16 +560,21 @@ function viewMonth(){
   var h = monthTabs(m,"sm")
     + '<div class="headline"><div class="big">'+money(s.total)+'</div>'
     + '<div class="sub">actually spent in '+monthName(m)
-    + (s.days ? ", about "+money(Math.round(s.total/s.days))+" a day across "+s.days+" day"+(s.days===1?"":"s")+" of entries" : "")
+    + (s.days >= 3 ? ", about "+money(Math.round(s.total/s.days))+" a day across "+s.days+" days of entries" : "")
     + '</div></div>';
 
   if(!s.rows.length) return h + '<p class="empty">Nothing logged for this month yet.</p>';
 
+  h += '<p class="small muted" style="margin:-4px 0 12px">Tap a tag to break it down.</p>';
   s.spendTags.forEach(function(p){
-    var pct = s.total ? (p[1]/s.total*100) : 0;
-    h += '<div class="bar"><div class="t"><span>'+esc(p[0])+'</span>'
-      + '<span class="mono">'+money(p[1])+' <span class="muted small">'+Math.round(pct)+'%</span></span></div>'
-      + '<div class="track"><div class="fill" style="width:'+pct.toFixed(1)+'%"></div></div></div>';
+    var pct = s.total ? (p[1]/s.total*100) : 0, open = state.openTag===p[0];
+    h += '<div class="bar"><button class="bartap" data-expand="'+esc(p[0])+'" aria-expanded="'+open+'">'
+      + '<span class="t"><span>'+esc(p[0])+'<span class="caret">'+(open?"\u25B4":"\u25BE")+'</span></span>'
+      + '<span class="mono">'+money(p[1])+' <span class="muted small">'+Math.round(pct)+'%</span></span></span>'
+      + '<span class="track"><span class="fill" style="display:block;width:'+pct.toFixed(1)+'%"></span></span>'
+      + '</button>'
+      + (open ? breakdownHTML(p[0], m) : "")
+      + '</div>';
   });
 
   if(s.otherTags.length){
@@ -564,7 +611,8 @@ function statementText(m){
   L.push("");
   L.push("Every entry:");
   s.rows.slice().sort(function(a,b){ return a.date<b.date?-1:a.date>b.date?1:0; }).forEach(function(e){
-    L.push(dayLabel(e.date) + " \u2014 " + (e.note || e.sub || e.tag) + " \u2014 " + money(e.amount) + " [" + e.tag + "]");
+    L.push(dayLabel(e.date) + " \u2014 " + (e.note || subLabel(e) || e.tag) + " \u2014 " + money(e.amount)
+      + " [" + e.tag + (subLabel(e) ? ": " + subLabel(e) : "") + "]");
   });
   return L.join("\n");
 }
@@ -589,7 +637,7 @@ function csvText(){
   var out = ["Date,Tag,Sub-tag,Item,Amount,Type"];
   load().slice().sort(function(a,b){ return a.date<b.date?-1:a.date>b.date?1:0; }).forEach(function(e){
     var t = (BY[e.tag]||{t:"spend"}).t;
-    out.push([e.date, q(e.tag), q(e.sub), q(e.note), e.amount, q(TYPE[t].label)].join(","));
+    out.push([e.date, q(e.tag), q(subsOf(e).join("; ")), q(e.note), e.amount, q(TYPE[t].label)].join(","));
   });
   return out.join("\n");
 }
@@ -645,23 +693,28 @@ document.addEventListener("click", function(ev){
   }
   if((b = ev.target.closest("[data-tag]"))){
     var name = b.dataset.tag, ps = b.dataset.picksub || null;
-    if(state.draft.tag===name && (!ps || state.draft.sub===ps)){
-      state.draft.tag = null; state.draft.sub = null;
+    if(state.draft.tag===name && (!ps || state.draft.subs.indexOf(ps)>-1)){
+      state.draft.tag = null; state.draft.subs = [];
     }else{
-      state.draft.tag = name; state.draft.sub = ps;
+      state.draft.tag = name; state.draft.subs = ps ? [ps] : [];
     }
     render(); return;
   }
   if((b = ev.target.closest("[data-sub]"))){
-    var s = b.dataset.sub;
-    state.draft.sub = state.draft.sub===s ? null : s; render(); return;
+    var s = b.dataset.sub, at = state.draft.subs.indexOf(s);
+    if(at > -1) state.draft.subs.splice(at,1); else state.draft.subs.push(s);
+    render(); return;
   }
   if(ev.target.closest("#saveBtn")){ commitDraft(); return; }
   if(ev.target.closest("#cancelEdit")){
-    state.draft = { amount:"", tag:null, sub:null, note:"", date:todayISO(), id:null }; render(); return;
+    state.draft = { amount:"", tag:null, subs:[], note:"", date:todayISO(), id:null }; render(); return;
   }
   if((b = ev.target.closest("[data-lm]"))){ state.ledgerMonth = b.dataset.lm; render(); return; }
-  if((b = ev.target.closest("[data-sm]"))){ state.summaryMonth = b.dataset.sm; render(); return; }
+  if((b = ev.target.closest("[data-sm]"))){ state.summaryMonth = b.dataset.sm; state.openTag = null; render(); return; }
+  if((b = ev.target.closest("[data-expand]"))){
+    state.openTag = state.openTag===b.dataset.expand ? null : b.dataset.expand;
+    render(); return;
+  }
 
   if((b = ev.target.closest("[data-kill]"))){
     var id = b.dataset.kill;
@@ -671,7 +724,7 @@ document.addEventListener("click", function(ev){
   if((b = ev.target.closest("[data-edit]"))){
     var e1 = load().filter(function(x){ return x.id===b.dataset.edit; })[0];
     if(e1){
-      state.draft = { amount:String(e1.amount), tag:e1.tag, sub:e1.sub||null, note:e1.note||"", date:e1.date, id:e1.id };
+      state.draft = { amount:String(e1.amount), tag:e1.tag, subs:subsOf(e1), note:e1.note||"", date:e1.date, id:e1.id };
       state.tab = "add"; render();
     }
     return;
@@ -679,7 +732,7 @@ document.addEventListener("click", function(ev){
   if((b = ev.target.closest("[data-repeat]"))){
     var e2 = load().filter(function(x){ return x.id===b.dataset.repeat; })[0];
     if(e2){
-      state.draft = { amount:String(e2.amount), tag:e2.tag, sub:e2.sub||null, note:e2.note||"", date:todayISO(), id:null };
+      state.draft = { amount:String(e2.amount), tag:e2.tag, subs:subsOf(e2), note:e2.note||"", date:todayISO(), id:null };
       render();
     }
     return;
