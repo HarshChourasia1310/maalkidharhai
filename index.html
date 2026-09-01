@@ -85,6 +85,14 @@
   .menu button:last-child{border-bottom:0}
   .menu .danger{color:var(--spend)}
   .menuhead{font-size:13px;color:var(--muted);padding-bottom:2px}
+  .lentrow{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--band)}
+  .lentrow .who{flex:1;min-width:0}
+  .lentrow .who .nm{font-size:15px;word-break:break-word}
+  .lentrow .who .bits{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .lentrow .out{font-family:var(--mono);font-size:15px;white-space:nowrap}
+  .settle{background:none;border:1px solid var(--rule);color:var(--ink);font-size:12px;padding:7px 9px;white-space:nowrap}
+  .delta{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .bd .cmp{font-size:12px;color:var(--muted);padding:2px 0 6px}
 
   .dayhead{display:flex;justify-content:space-between;align-items:baseline;
     border-bottom:1px solid var(--rule);padding-bottom:4px;margin:22px 0 2px;font-size:12px;color:var(--muted)}
@@ -137,12 +145,7 @@
 <body>
 <header><div id="app"><h1>Khata</h1><p>Every rupee, tagged the day it leaves.</p></div></header>
 <main id="app"><div id="view"></div></main>
-<nav><div>
-  <button data-tab="add" aria-current="page">Add</button>
-  <button data-tab="ledger">Ledger</button>
-  <button data-tab="month">Month</button>
-  <button data-tab="data">Data</button>
-</div></nav>
+<nav><div id="tabs"></div></nav>
 
 <script>
 /* ---------------- tags ---------------- */
@@ -327,6 +330,18 @@ var state = {
   summaryMonth:null
 };
 
+function hasLent(){
+  return load().some(function(e){ return e.tag==="Lent"; });
+}
+function renderTabs(){
+  var items = [["add","Add"],["ledger","Ledger"],["month","Month"]];
+  if(hasLent()) items.push(["lent","Lent"]);
+  items.push(["data","Data"]);
+  el("tabs").innerHTML = items.map(function(p){
+    return '<button data-tab="'+p[0]+'"'+(state.tab===p[0]?' aria-current="page"':'')+'>'+p[1]+'</button>';
+  }).join("");
+}
+
 function render(){
   var v = el("view");
   var warn = storageBroken
@@ -337,15 +352,14 @@ function render(){
       + (state.undo ? '<button class="undo" data-undo="1">Undo</button>' : '') + '</div>'
     : "";
   warn = warn + fl;
+  if(state.tab==="lent" && !hasLent()) state.tab = "add";
   if(state.tab==="add")         v.innerHTML = warn + viewAdd();
   else if(state.tab==="ledger") v.innerHTML = warn + viewLedger();
   else if(state.tab==="month")  v.innerHTML = warn + viewMonth();
+  else if(state.tab==="lent")   v.innerHTML = warn + viewLent();
   else                          v.innerHTML = warn + viewData();
 
-  document.querySelectorAll("nav button").forEach(function(b){
-    if(b.dataset.tab===state.tab) b.setAttribute("aria-current","page");
-    else b.removeAttribute("aria-current");
-  });
+  renderTabs();
   window.scrollTo(0,0);
 }
 
@@ -534,6 +548,23 @@ function viewLedger(){
 }
 
 /* ---------------- month ---------------- */
+function prevMonth(m){
+  var y = +m.slice(0,4), mo = +m.slice(5,7) - 1;
+  if(mo === 0){ y--; mo = 12; }
+  return y + "-" + pad(mo);
+}
+function tagTotal(m, name){
+  return load().reduce(function(s,e){
+    return s + (ym(e.date)===m && e.tag===name ? e.amount : 0);
+  }, 0);
+}
+function deltaLine(now, then, m){
+  if(!then) return "";
+  var d = Math.round(now - then), label = monthName(m).split(" ")[0];
+  if(Math.abs(d) < 1) return "level with " + label;
+  return (d > 0 ? "up " : "down ") + money(Math.abs(d)) + " on " + label;
+}
+
 function summarise(m){
   var rows = load().filter(function(e){ return ym(e.date)===m; });
   var byType = {spend:0, saved:0, moved:0, "in":0};
@@ -567,7 +598,11 @@ function breakdownHTML(tagName, m){
   var ordered = Object.keys(totals).map(function(k){ return [k, totals[k]]; })
                       .sort(function(a,b){ return b[1]-a[1]; });
 
-  var h = '<div class="bd"><h4>By sub-tag</h4>';
+  var pm = prevMonth(m), was = tagTotal(pm, tagName);
+  var h = '<div class="bd">';
+  if(was) h += '<p class="cmp">'+esc(monthName(pm))+': '+money(was)+' \u2014 '
+             + esc(deltaLine(rows.reduce(function(a,e){ return a+e.amount; },0), was, pm))+'</p>';
+  h += '<h4>By sub-tag</h4>';
   ordered.forEach(function(p){
     h += '<div class="sr"><span class="n">'+esc(p[0])+'</span>'
        + '<span class="mono">'+money(Math.round(p[1]))+'</span></div>';
@@ -587,12 +622,15 @@ function viewMonth(){
   var m = state.summaryMonth || months(load())[0];
   state.summaryMonth = m;
   var s = summarise(m);
+  var pm = prevMonth(m), prevTotal = summarise(pm).total;
 
   var h = monthTabs(m,"sm")
     + '<div class="headline"><div class="big">'+money(s.total)+'</div>'
     + '<div class="sub">actually spent in '+monthName(m)
     + (s.days >= 3 ? ", about "+money(Math.round(s.total/s.days))+" a day across "+s.days+" days of entries" : "")
-    + '</div></div>';
+    + '</div>'
+    + (prevTotal ? '<div class="delta">'+esc(deltaLine(s.total, prevTotal, pm))+'</div>' : "")
+    + '</div>';
 
   if(!s.rows.length) return h + '<p class="empty">Nothing logged for this month yet.</p>';
 
@@ -646,6 +684,68 @@ function statementText(m){
       + " [" + e.tag + (subLabel(e) ? ": " + subLabel(e) : "") + "]");
   });
   return L.join("\n");
+}
+
+/* ---------------- lent book ---------------- */
+function personOf(e){
+  var n = (e.note||"").trim();
+  return n || subLabel(e) || "Unnamed";
+}
+function lentBook(){
+  var by = {};
+  load().forEach(function(e){
+    var isOut = e.tag==="Lent";
+    var isBack = e.tag==="Return" && subsOf(e).indexOf("Repaid to me") > -1;
+    if(!isOut && !isBack) return;
+    var name = personOf(e), k = name.toLowerCase();
+    if(!by[k]) by[k] = { name:name, out:0, back:0, n:0 };
+    if(isOut){ by[k].out += e.amount; by[k].n++; }
+    else by[k].back += e.amount;
+  });
+  var all = Object.keys(by).map(function(k){
+    var r = by[k]; r.due = r.out - r.back; return r;
+  });
+  return {
+    open: all.filter(function(r){ return r.due > 0.5; }).sort(function(a,b){ return b.due - a.due; }),
+    settled: all.filter(function(r){ return r.due <= 0.5; }).sort(function(a,b){ return b.out - a.out; }),
+    total: all.reduce(function(s,r){ return s + Math.max(0, r.due); }, 0)
+  };
+}
+
+function viewLent(){
+  var b = lentBook();
+  var h = '<div class="headline"><div class="big">'+money(Math.round(b.total))+'</div>'
+        + '<div class="sub">still owed to you across '+b.open.length+' '
+        + (b.open.length===1?"person":"people")+'</div></div>';
+
+  if(!b.open.length && !b.settled.length){
+    return h + '<p class="empty">Nothing lent yet. Entries tagged Lent show up here, '
+      + 'and the name you put in the item field is who it went to.</p>';
+  }
+
+  if(b.open.length){
+    b.open.forEach(function(r){
+      h += '<div class="lentrow"><div class="who"><div class="nm">'+esc(r.name)+'</div>'
+        + '<div class="bits">lent '+money(r.out)+(r.back?' \u00B7 back '+money(r.back):'')
+        + ' \u00B7 '+r.n+' time'+(r.n===1?'':'s')+'</div></div>'
+        + '<div class="out">'+money(Math.round(r.due))+'</div>'
+        + '<button class="settle" data-settle="'+esc(r.name)+'">Got it back</button></div>';
+    });
+  }else{
+    h += '<p class="empty" style="padding:10px 0">Everything you lent has come back.</p>';
+  }
+
+  if(b.settled.length){
+    h += '<p class="small muted" style="margin:24px 0 4px">Settled</p>';
+    b.settled.forEach(function(r){
+      h += '<div class="lentrow"><div class="who"><div class="nm">'+esc(r.name)+'</div>'
+        + '<div class="bits">lent '+money(r.out)+' \u00B7 all returned</div></div></div>';
+    });
+  }
+
+  h += '<p class="small muted" style="margin:22px 0 0">Tap "Got it back" to log the repayment. '
+     + 'It fills in a Return entry with the amount and name already set.</p>';
+  return h;
 }
 
 /* ---------------- data ---------------- */
@@ -815,6 +915,14 @@ document.addEventListener("click", function(ev){
       setTimeout(function(){ state.flash=""; var fb=document.querySelector(".flashbar"); if(fb) fb.remove(); }, 2500);
     }
     return;
+  }
+  if((b = ev.target.closest("[data-settle]"))){
+    var who = b.dataset.settle, bk = lentBook();
+    var rec = bk.open.filter(function(r){ return r.name===who; })[0];
+    state.draft = { amount: rec ? String(Math.round(rec.due)) : "", tag:"Return",
+                    subs:["Repaid to me"], note:who, date:todayISO(), id:null };
+    state.tab = "add"; state.tagQuery = ""; state.flash = ""; state.undo = null;
+    render(); return;
   }
   if(ev.target.closest("#clearAll")){
     state.draft = { amount:"", tag:null, subs:[], note:"", date:todayISO(), id:null };
