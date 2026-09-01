@@ -1,4 +1,4 @@
-var CACHE = "khata-v1";
+var CACHE = "khata-v2";
 var FILES = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", function (e) {
