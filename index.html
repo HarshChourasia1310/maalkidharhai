@@ -96,6 +96,18 @@
   .settle{background:none;border:1px solid var(--rule);color:var(--ink);font-size:12px;padding:7px 9px;white-space:nowrap}
   .delta{font-size:12.5px;color:var(--muted);margin-top:3px}
   .bd .cmp{font-size:12px;color:var(--muted);padding:2px 0 6px}
+  .donutwrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:6px 0 4px}
+  .legend{flex:1;min-width:150px}
+  .lg{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0}
+  .lg .sw{width:11px;height:11px;flex:none;border-radius:2px}
+  .lg .ln{flex:1;min-width:0;word-break:break-word}
+  .nudge{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--band);
+    padding:12px;margin-bottom:14px;font-size:13.5px}
+  .nudge .grow{flex:1;min-width:130px}
+  .nudge button{font-size:13px;padding:8px 12px;border:1px solid var(--ink);background:var(--ink);color:var(--paper)}
+  .nudge .later{background:none;color:var(--muted);border-color:transparent;text-decoration:underline}
+  .sharebar{display:flex;gap:8px;flex-wrap:wrap;margin:22px 0 8px}
+  .sharebar button{flex:1;min-width:100px;padding:13px 8px;font-size:13.5px}
 
   .dayhead{display:flex;justify-content:space-between;align-items:baseline;
     border-bottom:1px solid var(--rule);padding-bottom:4px;margin:22px 0 2px;font-size:12px;color:var(--muted)}
@@ -270,8 +282,10 @@ var STARTER = ["Food & drink","Transport","Groceries","Shopping","Bill","Enterta
 var KEY = "khata.entries.v1";
 var memory = null;           // fallback when localStorage is unavailable
 var storageBroken = false;
+var SNAP = null;             // set when the page is opened from a shared link
 
 function load(){
+  if(SNAP) return SNAP.entries;
   if(memory) return memory;
   try{
     var raw = localStorage.getItem(KEY);
@@ -282,6 +296,7 @@ function load(){
   }
 }
 function save(list){
+  if(SNAP) return;           // a shared snapshot is never written to this device
   try{
     localStorage.setItem(KEY, JSON.stringify(list));
     memory = null;
@@ -342,9 +357,18 @@ function renderTabs(){
 
 function render(){
   var v = el("view");
+  if(SNAP){
+    document.querySelector("nav").style.display = "none";
+    v.innerHTML = viewSnapshot();
+    return;
+  }
   var warn = storageBroken
     ? '<div class="warn">This browser is blocking storage, so entries will vanish when you close the tab. Open the page over https (your GitHub Pages link) rather than as a local file.</div>'
     : "";
+  var nd = pendingNudge();
+  if(nd) warn += '<div class="nudge"><span class="grow">'+esc(nd.text)+'</span>'
+    + '<button data-nudge="'+esc(nd.key)+'">Make the link</button>'
+    + '<button class="later" data-nudgeoff="'+esc(nd.key)+'">Later</button></div>';
   var fl = state.flash
     ? '<div class="flashbar"><span>'+esc(state.flash)+'</span>'
       + (state.undo ? '<button class="undo" data-undo="1">Undo</button>' : '') + '</div>'
@@ -563,7 +587,9 @@ function deltaLine(now, then, m){
 }
 
 function summarise(m){
-  var rows = load().filter(function(e){ return ym(e.date)===m; });
+  return summariseRows(load().filter(function(e){ return ym(e.date)===m; }));
+}
+function summariseRows(rows){
   var byType = {spend:0, saved:0, moved:0, "in":0};
   var byTag = {};
   var days = {};
@@ -582,8 +608,10 @@ function summarise(m){
            total:byType.spend, days:Object.keys(days).length };
 }
 
-function breakdownHTML(tagName, m){
-  var rows = load().filter(function(e){ return ym(e.date)===m && e.tag===tagName; });
+function breakdownHTML(tagName, m, override){
+  var rows = override
+    ? override.filter(function(e){ return e.tag===tagName; })
+    : load().filter(function(e){ return ym(e.date)===m && e.tag===tagName; });
   var totals = {}, multi = false;
   rows.forEach(function(e){
     var subs = subsOf(e);
@@ -595,7 +623,7 @@ function breakdownHTML(tagName, m){
   var ordered = Object.keys(totals).map(function(k){ return [k, totals[k]]; })
                       .sort(function(a,b){ return b[1]-a[1]; });
 
-  var pm = prevMonth(m), was = tagTotal(pm, tagName);
+  var pm = m ? prevMonth(m) : null, was = (m && !override) ? tagTotal(pm, tagName) : 0;
   var h = '<div class="bd">';
   if(was) h += '<p class="cmp">'+esc(monthName(pm))+': '+money(was)+' \u2014 '
              + esc(deltaLine(rows.reduce(function(a,e){ return a+e.amount; },0), was, pm))+'</p>';
@@ -660,9 +688,13 @@ function viewMonth(){
     });
   }
 
-  h += '<div style="display:flex;gap:8px;margin:22px 0 8px">'
-     + '<button class="primary" id="shareMonth" style="margin:0">Share this month</button>'
-     + '</div>';
+  h += '<div class="sharebar">'
+     + '<button class="primary" id="shareWeek" style="margin:0">Send this week</button>'
+     + '<button class="primary" id="shareLink" style="margin:0">Send '+esc(monthName(m).split(" ")[0])+'</button>'
+     + '</div>'
+     + '<button class="ghost" id="shareMonth" style="width:100%">Share as plain text instead</button>'
+     + '<p class="small muted" style="margin:10px 0 0">The link opens a read-only view with the chart '
+     + 'and every entry. Nothing is uploaded \u2014 the numbers travel inside the link itself.</p>';
   return h;
 }
 
@@ -688,6 +720,71 @@ function statementText(m){
       + " [" + e.tag + (subLabel(e) ? ": " + subLabel(e) : "") + "]");
   });
   return L.join("\n");
+}
+
+/* ---------------- snapshot links ---------------- */
+var TAG_IDX = {};
+TAGS.forEach(function(t,i){ TAG_IDX[t.n] = i; });
+
+function b64(str){
+  return btoa(unescape(encodeURIComponent(str)))
+    .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function unb64(str){
+  var s = str.replace(/-/g,"+").replace(/_/g,"/");
+  while(s.length % 4) s += "=";
+  return decodeURIComponent(escape(atob(s)));
+}
+function dayNum(iso){ return Math.round(Date.parse(iso+"T00:00:00Z")/86400000); }
+function isoFromDay(n){ return new Date(n*86400000).toISOString().slice(0,10); }
+
+function packSnapshot(rows, label){
+  if(!rows.length) return null;
+  var base = Math.min.apply(null, rows.map(function(e){ return dayNum(e.date); }));
+  var packed = rows.map(function(e){
+    var ti = TAG_IDX[e.tag];
+    if(ti === undefined) ti = TAG_IDX["Misc."];
+    var subs = subsOf(e).map(function(sn){ return TAGS[ti].s.indexOf(sn); })
+                        .filter(function(i){ return i > -1; });
+    return [dayNum(e.date) - base, e.amount, ti, subs, e.note || ""];
+  });
+  return b64(JSON.stringify({ v:1, l:label, b:base, m:todayISO(), e:packed }));
+}
+
+function unpackSnapshot(code){
+  var o = JSON.parse(unb64(code));
+  if(!o || o.v !== 1 || !Array.isArray(o.e)) throw new Error("bad snapshot");
+  return {
+    label: o.l || "Shared ledger",
+    madeOn: o.m || "",
+    entries: o.e.map(function(a, i){
+      var t = TAGS[a[2]] || BY["Misc."];
+      return {
+        id: "s"+i,
+        date: isoFromDay(o.b + a[0]),
+        amount: a[1],
+        tag: t.n,
+        sub: (a[3]||[]).map(function(si){ return t.s[si]; }).filter(Boolean),
+        note: a[4] || ""
+      };
+    })
+  };
+}
+
+function snapshotURL(rows, label){
+  var code = packSnapshot(rows, label);
+  if(!code) return null;
+  return location.origin + location.pathname + "#s=" + code;
+}
+
+function rangeRows(fromISO, toISO){
+  return load().filter(function(e){ return e.date >= fromISO && e.date <= toISO; })
+               .sort(byNewest);
+}
+function weekWindow(){
+  var end = todayISO(), start = isoFromDay(dayNum(end) - 6);
+  return { from:start, to:end,
+           label: dayLabel(start) + " to " + dayLabel(end) };
 }
 
 /* ---------------- lent book ---------------- */
@@ -779,6 +876,82 @@ function viewLent(){
   return h;
 }
 
+/* ---------------- shared view ---------------- */
+var SLICE = ["#A32C17","#3A5880","#27604A","#7A5712","#7A4A6B","#4E5A4B","#8FA086"];
+
+function donutHTML(parts, total){
+  if(!total) return "";
+  var r = 52, C = 2 * Math.PI * r, off = 0, segs = "";
+  parts.forEach(function(p, i){
+    var frac = p[1] / total, len = C * frac;
+    segs += '<circle cx="70" cy="70" r="'+r+'" fill="none" stroke="'+SLICE[i % SLICE.length]+'" '
+          + 'stroke-width="26" stroke-dasharray="'+len.toFixed(2)+' '+(C-len).toFixed(2)+'" '
+          + 'stroke-dashoffset="'+(-off).toFixed(2)+'"><title>'+esc(p[0])+'</title></circle>';
+    off += len;
+  });
+  var h = '<div class="donutwrap"><svg viewBox="0 0 140 140" width="150" height="150" '
+        + 'style="transform:rotate(-90deg)" role="img" aria-label="Share of spending by tag">'
+        + segs + '</svg><div class="legend">';
+  parts.forEach(function(p, i){
+    h += '<div class="lg"><span class="sw" style="background:'+SLICE[i % SLICE.length]+'"></span>'
+       + '<span class="ln">'+esc(p[0])+'</span>'
+       + '<span class="mono">'+Math.round(p[1]/total*100)+'%</span></div>';
+  });
+  return h + '</div></div>';
+}
+
+function topParts(spendTags, total){
+  var parts = spendTags.slice(0, 6).map(function(p){ return [p[0], p[1]]; });
+  var rest = spendTags.slice(6).reduce(function(a,p){ return a + p[1]; }, 0);
+  if(rest > 0) parts.push(["Everything else", rest]);
+  return parts;
+}
+
+function viewSnapshot(){
+  var s = summariseRows(SNAP.entries);
+  var h = '<div class="headline"><div class="big">'+money(s.total)+'</div>'
+        + '<div class="sub">spent \u00B7 '+esc(SNAP.label)+'</div></div>';
+
+  if(!s.rows.length) return h + '<p class="empty">This snapshot has no entries in it.</p>';
+
+  h += donutHTML(topParts(s.spendTags, s.total), s.total);
+  h += '<p class="small muted" style="margin:18px 0 10px">Tap a tag to see what it was made of.</p>';
+
+  s.spendTags.forEach(function(p){
+    var pct = s.total ? (p[1]/s.total*100) : 0, open = state.openTag===p[0];
+    h += '<div class="bar"><button class="bartap" data-expand="'+esc(p[0])+'" aria-expanded="'+open+'">'
+      + '<span class="t"><span>'+esc(p[0])+'<span class="caret">'+(open?"\u25B4":"\u25BE")+'</span></span>'
+      + '<span class="mono">'+money(p[1])+' <span class="muted small">'+Math.round(pct)+'%</span></span></span>'
+      + '<span class="track"><span class="fill" style="display:block;width:'+pct.toFixed(1)+'%"></span></span>'
+      + '</button>'
+      + (open ? breakdownHTML(p[0], null, SNAP.entries) : "")
+      + '</div>';
+  });
+
+  if(s.otherTags.length){
+    h += '<p class="small muted" style="margin:26px 0 6px">Money that moved but was not spent. Tap to break it down.</p>';
+    s.otherTags.forEach(function(p){
+      var t = (BY[p[0]]||{t:"moved"}).t, open = state.openTag===p[0];
+      h += '<div><button class="bartap" data-expand="'+esc(p[0])+'" aria-expanded="'+open+'">'
+        + '<span class="row" style="border-bottom:1px solid var(--hair)">'
+        +   '<span style="color:'+TYPE[t].color+'">'+icon(p[0],19)+'</span>'
+        +   '<span class="body"><span class="what">'+esc(p[0])
+        +     '<span class="caret">'+(open?"\u25B4":"\u25BE")+'</span></span>'
+        +     '<span class="meta" style="display:block">'+TYPE[t].label+'</span></span>'
+        +   '<span class="amt">'+money(p[1])+'</span>'
+        + '</span></button>'
+        + (open ? breakdownHTML(p[0], null, SNAP.entries) : "")
+        + '</div>';
+    });
+  }
+
+  h += '<p class="small muted" style="margin:26px 0 6px">A snapshot sent to you'
+     + (SNAP.madeOn ? " on " + esc(dayLabel(SNAP.madeOn)) : "")
+     + '. It is read-only and nothing is stored on this phone.</p>'
+     + '<button class="linkbtn" id="exitSnap">Open my own ledger instead</button>';
+  return h;
+}
+
 /* ---------------- data ---------------- */
 function viewData(){
   var list = load();
@@ -814,7 +987,10 @@ function openSheet(title, body, opts){
     + '<button class="kill" data-close="1" aria-label="Close" style="font-size:22px">\u00D7</button></div>'
     + '<textarea '+(opts.editable?'':'readonly')+' spellcheck="false"'
     + (opts.placeholder?' placeholder="'+esc(opts.placeholder)+'"':'')+'>'+esc(body)+'</textarea>'
-    + '<button class="primary" data-act="1">'+esc(opts.action || "Copy all")+'</button>'
+    + (opts.share && navigator.share
+        ? '<button class="primary" data-send="1" style="margin-bottom:8px">Send it</button>' : '')
+    + '<button class="'+(opts.share && navigator.share ? "ghost" : "primary")
+    + '" data-act="1" style="width:100%;padding:15px">'+esc(opts.action || "Copy all")+'</button>'
     + '</div>';
   document.body.appendChild(veil);
   var ta = veil.querySelector("textarea");
@@ -823,6 +999,10 @@ function openSheet(title, body, opts){
   function close(){ veil.remove(); }
   veil.addEventListener("click", function(ev){
     if(ev.target===veil || ev.target.closest("[data-close]")) close();
+  });
+  var send = veil.querySelector("[data-send]");
+  if(send) send.addEventListener("click", function(){
+    navigator.share(opts.share).catch(function(){});
   });
   btn.addEventListener("click", function(){
     if(opts.editable){
@@ -893,6 +1073,51 @@ function deleteEntry(id){
       var fb = document.querySelector(".flashbar"); if(fb) fb.remove();
     }
   }, 8000);
+}
+
+function nudgeSeen(k, v){
+  try{
+    if(v === undefined) return localStorage.getItem("khata.nudge." + k);
+    localStorage.setItem("khata.nudge." + k, v);
+  }catch(e){}
+  return null;
+}
+
+function pendingNudge(){
+  var now = new Date(), dow = now.getDay(), dom = now.getDate();
+  var last = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+
+  if(dom >= last - 1 || dom <= 2){
+    var m = dom <= 2 ? prevMonth(ym(todayISO())) : ym(todayISO());
+    if(nudgeSeen("m." + m) !== "1" && summarise(m).rows.length){
+      return { kind:"month", key:"m."+m, month:m,
+               text:"Month's nearly done. Send " + monthName(m) + " across?" };
+    }
+  }
+  if(dow === 0){
+    var wk = weekWindow();
+    if(nudgeSeen("w." + wk.to) !== "1" && rangeRows(wk.from, wk.to).length){
+      return { kind:"week", key:"w."+wk.to, win:wk,
+               text:"It's Sunday. Send this week across?" };
+    }
+  }
+  return null;
+}
+
+function shareSheet(rows, label){
+  if(!rows.length){
+    openSheet("Nothing to share", "There are no entries in that range yet.");
+    return;
+  }
+  var url = snapshotURL(rows, label);
+  var warn = url.length > 8000
+    ? "\n\nThis link is long (" + url.length + " characters). If WhatsApp mangles it, "
+      + "share a shorter range instead."
+    : "";
+  openSheet("Link for " + label, url + warn, {
+    action: "Copy link",
+    share: { title: "Khata \u2014 " + label, text: "My spending: " + label, url: url }
+  });
 }
 
 /* ---------------- events ---------------- */
@@ -982,6 +1207,34 @@ document.addEventListener("click", function(ev){
     return;
   }
 
+  if((b = ev.target.closest("[data-nudgeoff]"))){
+    nudgeSeen(b.dataset.nudgeoff, "1");
+    var nb = document.querySelector(".nudge"); if(nb) nb.remove();
+    return;
+  }
+  if((b = ev.target.closest("[data-nudge]"))){
+    var nd2 = pendingNudge();
+    nudgeSeen(b.dataset.nudge, "1");
+    if(nd2 && nd2.kind==="week") shareSheet(rangeRows(nd2.win.from, nd2.win.to), nd2.win.label);
+    else if(nd2) shareSheet(load().filter(function(e){ return ym(e.date)===nd2.month; }).sort(byNewest),
+                            monthName(nd2.month));
+    var nb2 = document.querySelector(".nudge"); if(nb2) nb2.remove();
+    return;
+  }
+  if(ev.target.closest("#exitSnap")){
+    location.href = location.origin + location.pathname;
+    return;
+  }
+  if(ev.target.closest("#shareWeek")){
+    var wk2 = weekWindow();
+    shareSheet(rangeRows(wk2.from, wk2.to), wk2.label);
+    return;
+  }
+  if(ev.target.closest("#shareLink")){
+    var mm = state.summaryMonth || months(load())[0];
+    shareSheet(load().filter(function(e){ return ym(e.date)===mm; }).sort(byNewest), monthName(mm));
+    return;
+  }
   if(ev.target.closest("#shareMonth")){
     openSheet("Statement for " + monthName(state.summaryMonth), statementText(state.summaryMonth));
     return;
@@ -1052,7 +1305,17 @@ function syncSaveBtn(){
                        : "Enter an amount and pick a tag";
 }
 
-render();
+if(location.hash.indexOf("#s=") === 0){
+  try{
+    SNAP = unpackSnapshot(location.hash.slice(3));
+  }catch(err){
+    SNAP = null;
+    document.getElementById("view").innerHTML =
+      '<p class="empty">That shared link is damaged or incomplete. '
+      + 'Ask for it again \u2014 WhatsApp sometimes cuts very long links.</p>';
+  }
+}
+if(!(location.hash.indexOf("#s=") === 0 && !SNAP)) render();
 
 if("serviceWorker" in navigator && location.protocol === "https:"){
   navigator.serviceWorker.register("sw.js").catch(function(){});
