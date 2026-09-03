@@ -76,6 +76,8 @@
   .row .kill{background:none;border:0;color:var(--muted);font-size:19px;line-height:1;padding:0 2px}
   .row .more{background:none;border:0;color:var(--muted);padding:2px 4px;line-height:1;align-self:center}
   .toolbar{display:flex;justify-content:flex-end;gap:14px;margin:-10px 0 12px}
+  .importbar{display:flex;gap:8px;margin:0 0 12px}
+  .importbar button{flex:1;padding:11px 6px;font-size:12.5px}
   .linkbtn{background:none;border:0;color:var(--muted);font-size:12.5px;padding:5px 0;text-decoration:underline}
   .flashbar{display:flex;align-items:center;justify-content:space-between;gap:12px;
     background:var(--band);padding:10px 12px;margin-bottom:14px;font-size:13px}
@@ -100,7 +102,15 @@
   .legend{flex:1;min-width:150px}
   .lg{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0}
   .lg .sw{width:11px;height:11px;flex:none;border-radius:2px}
+  .lg{cursor:default}
   .lg .ln{flex:1;min-width:0;word-break:break-word}
+  .slice{cursor:pointer;transition:opacity .12s}
+  .donutwrap.dim .slice{opacity:.45}
+  .donutwrap.dim .slice.on{opacity:1}
+  .donutwrap{position:relative}
+  .tip{position:absolute;z-index:20;background:var(--ink);color:var(--paper);padding:9px 11px;
+    font-size:12.5px;line-height:1.5;max-width:230px;pointer-events:none;box-shadow:0 2px 10px rgba(28,42,33,.28)}
+  .tip strong{font-weight:600}
   .nudge{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--band);
     padding:12px;margin-bottom:14px;font-size:13.5px}
   .nudge .grow{flex:1;min-width:130px}
@@ -344,6 +354,7 @@ var state = {
   draft:{ amount:"", tag:null, subs:[], note:"", date:todayISO(), id:null },
   flash:"", undo:null,
   tagQuery:"", showAllTags:false, openTag:null, openPerson:null,
+  readNote:"", candidates:null,
   ledgerMonth:null, ledgerQuery:"",
   summaryMonth:null
 };
@@ -401,6 +412,18 @@ function viewAdd(){
     h += '<div class="toolbar">'
        + (d.id ? '<button class="linkbtn" id="cancelEdit">Cancel edit</button>' : '')
        + '<button class="linkbtn" id="clearAll">Clear</button></div>';
+  }
+  h += '<div class="importbar">'
+     + '<button class="ghost" id="pastePay">Paste a payment message</button>'
+     + '<button class="ghost" id="pickShot">Read a screenshot</button>'
+     + '<input type="file" id="shotFile" accept="image/*" hidden>'
+     + '</div>';
+  if(state.readNote) h += '<p class="small muted" style="margin:0 0 12px">'+esc(state.readNote)+'</p>';
+  if(state.candidates && state.candidates.length > 1){
+    h += '<p class="small muted" style="margin:0 0 6px">Not that amount? '+
+         state.candidates.map(function(c){
+           return '<button class="linkbtn" data-pickamt="'+c+'" style="margin-right:10px">'+money(c)+'</button>';
+         }).join("") + '</p>';
   }
   h += '<input class="tagsearch" id="tagq" placeholder="Search tags or items, e.g. swiggy, fuel"'
      + ' aria-label="Search tags" value="'+esc(state.tagQuery)+'">'
@@ -500,6 +523,7 @@ function commitDraft(){
   save(list);
   state.draft = { amount:"", tag:null, subs:[], note:"", date:todayISO(), id:null };
   state.tagQuery = ""; state.showAllTags = false;
+  state.readNote = ""; state.candidates = null;
   render();
   setTimeout(function(){ if(state.flash){ state.flash=""; if(state.tab==="add") render(); } }, 2600);
 }
@@ -722,6 +746,150 @@ function statementText(m){
   return L.join("\n");
 }
 
+/* ---------------- reading payment messages ---------------- */
+var MERCHANTS = [
+  ["Food & drink","Swiggy",     ["swiggy"]],
+  ["Food & drink","Zomato",     ["zomato","eternal ltd"]],
+  ["Food & drink","Pizza",      ["domino","pizza hut","papa john"]],
+  ["Food & drink","Fast food",  ["mcdonald","burger king","kfc","subway","wendy"]],
+  ["Food & drink","Coffee",     ["starbucks","third wave","blue tokai","chaayos","chai point"]],
+  ["Food & drink","Eat out",    ["restaurant","biryani","barbeque","dhaba","cafe","kitchen","foods"]],
+  ["Food & drink","Liquor",     ["wine","liquor","brewery","tasmac"]],
+  ["Groceries","Zepto",         ["zepto"]],
+  ["Groceries","Staples",       ["blinkit","grofers","bigbasket","dmart","d-mart","reliance fresh","reliance smart","more retail","spencer","instamart","jiomart","star bazaar"]],
+  ["Groceries","Vegetables",    ["sabzi","vegetable","mandi"]],
+  ["Groceries","Dairy",         ["amul","mother dairy","milk"]],
+  ["Transport","Uber",          ["uber"]],
+  ["Transport","Cab",           ["ola cabs","olacabs","ola money"]],
+  ["Transport","Auto",          ["rapido","auto"]],
+  ["Transport","Fuel",          ["indianoil","indian oil","hpcl","hp petrol","bharat petroleum","bpcl","shell","nayara","petrol","fuel","reliance petro"]],
+  ["Transport","Train",         ["irctc","railway"]],
+  ["Transport","Metro",         ["metro rail","maha metro","pune metro","dmrc","bmrcl"]],
+  ["Transport","FASTag",        ["fastag","netc","toll"]],
+  ["Transport","Parking",       ["parking"]],
+  ["Shopping","Electronics",    ["croma","reliance digital","vijay sales"]],
+  ["Shopping","Clothes",        ["myntra","ajio","zudio","westside","max fashion","h and m","uniqlo","levis"]],
+  ["Shopping","Footwear",       ["bata","nike","adidas","puma","campus shoes"]],
+  ["Shopping","Other",          ["amazon","flipkart","meesho","snapdeal","nykaa","ikea","decathlon"]],
+  ["Subscription","Netflix",    ["netflix"]],
+  ["Subscription","Spotify",    ["spotify"]],
+  ["Subscription","Prime",      ["amazon prime","prime video"]],
+  ["Subscription","Hotstar",    ["hotstar","jiocinema","jio cinema"]],
+  ["Subscription","YouTube",    ["youtube","google one"]],
+  ["Subscription","Apple",      ["apple.com","itunes","icloud"]],
+  ["Subscription","Software",   ["openai","anthropic","adobe","microsoft 365","github","notion","figma"]],
+  ["Bill","Phone",              ["airtel","vodafone","vi recharge","bsnl","jio recharge","jio prepaid"]],
+  ["Bill","WiFi",               ["jio fiber","jiofiber","act fibernet","hathway","excitel","broadband"]],
+  ["Bill","Electricity",        ["msedcl","mahavitaran","bescom","tneb","electricity","power supply","adani electricity","tata power"]],
+  ["Bill","Gas",                ["indane","hp gas","bharat gas","mahanagar gas","gail"]],
+  ["Bill","DTH",                ["tata play","tatasky","dish tv","d2h","sun direct"]],
+  ["Bill","Rent",               ["rent","nobroker","housing.com"]],
+  ["Bill","Education",          ["fee","tuition","university","college","mit-wpu","mitwpu"]],
+  ["Medical","Medicine",        ["pharmeasy","netmeds","1mg","tata 1mg","apollo pharmacy","medplus","wellness forever","chemist","pharmacy","medical store"]],
+  ["Medical","Hospital",        ["hospital","clinic","diagnostics","lab","pathology"]],
+  ["Entertainment","Movies",    ["bookmyshow","pvr","inox","cinepolis","cinema"]],
+  ["Entertainment","Concert",   ["district","zomato live","insider.in"]],
+  ["Travel","Hotel",            ["oyo","makemytrip","goibibo","cleartrip","booking.com","treebo","fabhotel"]],
+  ["Travel","Airbnb",           ["airbnb"]],
+  ["Travel","Activity",         ["indigo","air india","spicejet","akasa","vistara"]],
+  ["Fitness","Gym",             ["cult.fit","cultfit","gold gym","anytime fitness","gym"]],
+  ["Fitness","Nutrition",       ["muscleblaze","optimum nutrition","healthkart","whey"]],
+  ["Personal","Grooming",       ["salon","barber","urban company","urbanclap"]],
+  ["Service","Courier",         ["blue dart","delhivery","dtdc","fedex","india post"]],
+  ["Service","Laundry",         ["laundry","dry clean"]],
+  ["Investment","Stock",        ["zerodha","groww","upstox","angel one","icici direct"]],
+  ["Investment","Mutual fund",  ["coin","kuvera","mutual fund","amc","sip"]]
+];
+
+var CREDIT_WORDS = ["credited","received from","has been credited","refund","refunded","cashback","reversed","money received"];
+var DEBIT_WORDS  = ["debited","paid to","payment of","sent to","spent","purchase","withdrawn","transferred to"];
+
+function amountCandidates(text){
+  var found = [], byVal = {};
+  function add(v, weight, idx){
+    var n = parseFloat(v.replace(/,/g,""));
+    if(!(n > 0) || n > 10000000) return;
+    // an available balance or a card limit is not what you just spent
+    var pre = text.slice(Math.max(0, idx - 28), idx).toLowerCase();
+    if(/avl|avail|lmt|limit|bal\b|balance|outstanding/.test(pre)) return;
+    var k = n.toFixed(2);
+    if(byVal[k] !== undefined){
+      var f = found[byVal[k]];
+      if(weight > f.w){ f.w = weight; f.i = idx; }
+      return;
+    }
+    byVal[k] = found.length;
+    found.push({ n:n, w:weight, i:idx });
+  }
+
+  var pats = [
+    // right after the verb: "debited by 450.0", "credited with Rs.1,500"
+    [/(?:debited(?:\s+(?:by|for|with))?|credited(?:\s+(?:by|with))?|spent|paid|sent|withdrawn|transferred|payment of|amount of|txn of)\s*(?:\u20b9|rs\.?|inr)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/gi, 4],
+    // an explicit currency marker
+    [/(?:\u20b9|\brs\.?|\binr\b)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/gi, 3],
+    // OCR turns the rupee sign into a stray glyph glued to the number
+    [/(?:^|\s)[7zZ%F$\u00a5\u20a8]\s?([0-9][0-9,]*\.[0-9]{2})(?!\d)/g, 2],
+    // a bare decimal amount standing on its own
+    [/(?:^|\s)([0-9][0-9,]*\.[0-9]{2})(?!\d)/g, 1]
+  ];
+  pats.forEach(function(p){
+    var m, re = p[0];
+    re.lastIndex = 0;
+    while((m = re.exec(text))) add(m[1], p[1], m.index + m[0].indexOf(m[1]));
+  });
+  found.sort(function(a,b){ return b.w - a.w || a.i - b.i; });
+  return found;
+}
+
+function guessTag(text){
+  var low = text.toLowerCase();
+  for(var i = 0; i < MERCHANTS.length; i++){
+    var row = MERCHANTS[i];
+    for(var j = 0; j < row[2].length; j++){
+      if(low.indexOf(row[2][j]) > -1) return { tag:row[0], sub:row[1], hit:row[2][j] };
+    }
+  }
+  return null;
+}
+
+function guessMerchant(text){
+  var lines = text.split(/[\n\r]+/).map(function(l){ return l.trim(); }).filter(Boolean);
+  var best = "";
+  lines.forEach(function(l){
+    if(/^[A-Z][A-Z0-9 &.'\-]{3,30}$/.test(l) && !/^(UPI|COMPLETED|PAID|SUCCESS|INR|RS)\b/.test(l)){
+      if(l.length > best.length) best = l;
+    }
+  });
+  if(best) return best.replace(/\s+/g," ").trim();
+  var vpa = text.match(/\b([a-z0-9._-]{3,})@[a-z]{2,}\b/i);
+  if(vpa) return vpa[1];
+  var to = text.match(/(?:paid to|sent to|to)\s+([A-Za-z][A-Za-z0-9 &.'-]{2,28})/i);
+  return to ? to[1].trim() : "";
+}
+
+function parsePayment(text){
+  if(!text || !text.trim()) return null;
+  var low = text.toLowerCase();
+  var credit = CREDIT_WORDS.some(function(w){ return low.indexOf(w) > -1; });
+  var debit  = DEBIT_WORDS.some(function(w){ return low.indexOf(w) > -1; });
+  var cands = amountCandidates(text);
+  var g = guessTag(text);
+  var merchant = guessMerchant(text);
+
+  var tag, sub;
+  if(credit && !debit){ tag = "Return"; sub = low.indexOf("refund") > -1 ? "Refund" : "Repaid to me"; }
+  else if(g){ tag = g.tag; sub = g.sub; }
+  else { tag = null; sub = null; }
+
+  return {
+    amount: cands.length ? cands[0].n : null,
+    candidates: cands.map(function(c){ return c.n; }).slice(0, 5),
+    tag: tag, sub: sub, merchant: merchant,
+    direction: credit && !debit ? "in" : "out",
+    raw: text.trim()
+  };
+}
+
 /* ---------------- snapshot links ---------------- */
 var TAG_IDX = {};
 TAGS.forEach(function(t,i){ TAG_IDX[t.n] = i; });
@@ -738,37 +906,131 @@ function unb64(str){
 function dayNum(iso){ return Math.round(Date.parse(iso+"T00:00:00Z")/86400000); }
 function isoFromDay(n){ return new Date(n*86400000).toISOString().slice(0,10); }
 
+/* --- LZW over UTF-8 bytes, variable-width codes, base64url out --- */
+function toBin(str){ return unescape(encodeURIComponent(str)); }
+function fromBin(bin){ return decodeURIComponent(escape(bin)); }
+
+function lzwPack(bin){
+  var dict = {}, next = 256, w = "", codes = [], i, c, wc;
+  for(i = 0; i < 256; i++) dict[String.fromCharCode(i)] = i;
+  for(i = 0; i < bin.length; i++){
+    c = bin.charAt(i); wc = w + c;
+    if(dict[wc] !== undefined){ w = wc; continue; }
+    codes.push(dict[w]);
+    if(next < 65536) dict[wc] = next++;
+    w = c;
+  }
+  if(w !== "") codes.push(dict[w]);
+
+  var out = [], acc = 0, bits = 0, width = 9, limit = 512, seen = 256;
+  for(i = 0; i < codes.length; i++){
+    acc = (acc << width) | codes[i];
+    bits += width;
+    while(bits >= 8){ bits -= 8; out.push((acc >> bits) & 255); }
+    if(seen < 65536){ seen++; if(seen >= limit && width < 16){ width++; limit <<= 1; } }
+  }
+  if(bits > 0) out.push((acc << (8 - bits)) & 255);
+
+  var bin2 = "";
+  for(i = 0; i < out.length; i++) bin2 += String.fromCharCode(out[i]);
+  return btoa(bin2).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+
+function lzwUnpack(b64s){
+  var t = b64s.replace(/-/g,"+").replace(/_/g,"/");
+  while(t.length % 4) t += "=";
+  var bin = atob(t), i;
+
+  var codes = [], acc = 0, bits = 0, width = 9, limit = 512, seen = 256;
+  for(i = 0; i < bin.length; i++){
+    acc = (acc << 8) | bin.charCodeAt(i);
+    bits += 8;
+    while(bits >= width){
+      bits -= width;
+      codes.push((acc >> bits) & ((1 << width) - 1));
+      acc &= (1 << bits) - 1;
+      if(seen < 65536){ seen++; if(seen >= limit && width < 16){ width++; limit <<= 1; } }
+    }
+  }
+  if(!codes.length) return "";
+
+  var dict = [], entry, w2, out;
+  for(i = 0; i < 256; i++) dict.push(String.fromCharCode(i));
+  w2 = dict[codes[0]]; out = w2;
+  for(i = 1; i < codes.length; i++){
+    var k = codes[i];
+    if(k < dict.length) entry = dict[k];
+    else if(k === dict.length) entry = w2 + w2.charAt(0);
+    else break;                       // trailing padding bits
+    out += entry;
+    if(dict.length < 65536) dict.push(w2 + entry.charAt(0));
+    w2 = entry;
+  }
+  return out;
+}
+
+function escField(s){
+  return String(s == null ? "" : s).replace(/\\/g,"\\\\").replace(/\|/g,"\\p").replace(/\n/g,"\\n");
+}
+function unescField(s){
+  return s.replace(/\\(.)/g, function(_, c){
+    return c === "p" ? "|" : c === "n" ? "\n" : c;
+  });
+}
+
 function packSnapshot(rows, label){
   if(!rows.length) return null;
   var base = Math.min.apply(null, rows.map(function(e){ return dayNum(e.date); }));
-  var packed = rows.map(function(e){
+  var lines = ["K1|" + escField(label) + "|" + base + "|" + todayISO()];
+  rows.forEach(function(e){
     var ti = TAG_IDX[e.tag];
     if(ti === undefined) ti = TAG_IDX["Misc."];
     var subs = subsOf(e).map(function(sn){ return TAGS[ti].s.indexOf(sn); })
                         .filter(function(i){ return i > -1; });
-    return [dayNum(e.date) - base, e.amount, ti, subs, e.note || ""];
+    lines.push([dayNum(e.date) - base, e.amount, ti, subs.join(","), escField(e.note)].join("|"));
   });
-  return b64(JSON.stringify({ v:1, l:label, b:base, m:todayISO(), e:packed }));
+  return "z" + lzwPack(toBin(lines.join("\n")));
 }
 
 function unpackSnapshot(code){
-  var o = JSON.parse(unb64(code));
-  if(!o || o.v !== 1 || !Array.isArray(o.e)) throw new Error("bad snapshot");
-  return {
-    label: o.l || "Shared ledger",
-    madeOn: o.m || "",
-    entries: o.e.map(function(a, i){
-      var t = TAGS[a[2]] || BY["Misc."];
-      return {
-        id: "s"+i,
-        date: isoFromDay(o.b + a[0]),
-        amount: a[1],
-        tag: t.n,
-        sub: (a[3]||[]).map(function(si){ return t.s[si]; }).filter(Boolean),
-        note: a[4] || ""
-      };
-    })
-  };
+  if(code.charAt(0) !== "z"){          // links made before compression
+    var o = JSON.parse(unb64(code));
+    if(!o || o.v !== 1 || !Array.isArray(o.e)) throw new Error("bad snapshot");
+    return {
+      label: o.l || "Shared ledger",
+      madeOn: o.m || "",
+      entries: o.e.map(function(a, i){
+        var t = TAGS[a[2]] || BY["Misc."];
+        return { id:"s"+i, date:isoFromDay(o.b + a[0]), amount:a[1], tag:t.n,
+                 sub:(a[3]||[]).map(function(si){ return t.s[si]; }).filter(Boolean),
+                 note:a[4] || "" };
+      })
+    };
+  }
+
+  var text = fromBin(lzwUnpack(code.slice(1)));
+  var lines = text.split("\n");
+  var head = lines[0].split("|");
+  if(head[0] !== "K1") throw new Error("bad snapshot");
+  var base = parseInt(head[2], 10);
+  if(isNaN(base)) throw new Error("bad snapshot");
+
+  var entries = [];
+  for(var i = 1; i < lines.length; i++){
+    if(!lines[i]) continue;
+    var f = lines[i].split("|");
+    var t = TAGS[+f[2]] || BY["Misc."];
+    entries.push({
+      id: "s" + i,
+      date: isoFromDay(base + (+f[0])),
+      amount: +f[1],
+      tag: t.n,
+      sub: (f[3] ? f[3].split(",") : []).map(function(si){ return t.s[+si]; }).filter(Boolean),
+      note: unescField(f[4] || "")
+    });
+  }
+  if(!entries.length) throw new Error("bad snapshot");
+  return { label: unescField(head[1] || "Shared ledger"), madeOn: head[3] || "", entries: entries };
 }
 
 function snapshotURL(rows, label){
@@ -879,31 +1141,73 @@ function viewLent(){
 /* ---------------- shared view ---------------- */
 var SLICE = ["#A32C17","#3A5880","#27604A","#7A5712","#7A4A6B","#4E5A4B","#8FA086"];
 
-function donutHTML(parts, total){
+function sliceDetail(name, value, rows){
+  if(name === "Everything else"){
+    var byTag = {};
+    rows.forEach(function(e){
+      if((BY[e.tag]||{t:"spend"}).t === "spend") byTag[e.tag] = (byTag[e.tag]||0) + e.amount;
+    });
+    return Object.keys(byTag).map(function(k){ return [k, byTag[k]]; })
+                 .sort(function(a,b){ return b[1]-a[1]; });
+  }
+  var mine = rows.filter(function(e){ return e.tag === name; });
+  var totals = {};
+  mine.forEach(function(e){
+    var subs = subsOf(e);
+    if(!subs.length) subs = ["Not specified"];
+    var share = e.amount / subs.length;
+    subs.forEach(function(sn){ totals[sn] = (totals[sn]||0) + share; });
+  });
+  return Object.keys(totals).map(function(k){ return [k, totals[k]]; })
+               .sort(function(a,b){ return b[1]-a[1]; });
+}
+
+function donutHTML(parts, total, rows){
   if(!total) return "";
   var r = 52, C = 2 * Math.PI * r, off = 0, segs = "";
+  var restNames = parts.length && parts[parts.length-1][0]==="Everything else" ? parts[parts.length-1][2] : null;
   parts.forEach(function(p, i){
     var frac = p[1] / total, len = C * frac;
-    segs += '<circle cx="70" cy="70" r="'+r+'" fill="none" stroke="'+SLICE[i % SLICE.length]+'" '
+    var detail = sliceDetail(p[0], p[1], p[2] || rows);
+    var tip = '<strong>'+esc(p[0])+'</strong> \u00B7 '+money(Math.round(p[1]))
+            + ' \u00B7 '+Math.round(frac*100)+'%<br>'
+            + detail.slice(0,8).map(function(d){
+                return esc(d[0]) + ' \u2014 ' + money(Math.round(d[1]));
+              }).join('<br>');
+    segs += '<circle class="slice" cx="70" cy="70" r="'+r+'" fill="none" stroke="'+SLICE[i % SLICE.length]+'" '
           + 'stroke-width="26" stroke-dasharray="'+len.toFixed(2)+' '+(C-len).toFixed(2)+'" '
-          + 'stroke-dashoffset="'+(-off).toFixed(2)+'"><title>'+esc(p[0])+'</title></circle>';
+          + 'stroke-dashoffset="'+(-off).toFixed(2)+'" '
+          + 'data-tip="'+esc(tip)+'" data-slicetag="'+esc(p[0])+'" tabindex="0" '
+          + 'role="button" aria-label="'+esc(p[0])+', '+Math.round(frac*100)+' percent">'
+          + '<title>'+esc(p[0])+'</title></circle>';
     off += len;
   });
-  var h = '<div class="donutwrap"><svg viewBox="0 0 140 140" width="150" height="150" '
+  var h = '<div class="donutwrap"><div class="tip" id="tip" hidden></div><svg viewBox="0 0 140 140" width="150" height="150" '
         + 'style="transform:rotate(-90deg)" role="img" aria-label="Share of spending by tag">'
         + segs + '</svg><div class="legend">';
   parts.forEach(function(p, i){
-    h += '<div class="lg"><span class="sw" style="background:'+SLICE[i % SLICE.length]+'"></span>'
+    var detail = sliceDetail(p[0], p[1], p[2] || rows);
+    var tip = '<strong>'+esc(p[0])+'</strong> \u00B7 '+money(Math.round(p[1]))+'<br>'
+            + detail.slice(0,8).map(function(d){
+                return esc(d[0]) + ' \u2014 ' + money(Math.round(d[1]));
+              }).join('<br>');
+    h += '<div class="lg" data-tip="'+esc(tip)+'" data-slicetag="'+esc(p[0])+'">'
+       + '<span class="sw" style="background:'+SLICE[i % SLICE.length]+'"></span>'
        + '<span class="ln">'+esc(p[0])+'</span>'
        + '<span class="mono">'+Math.round(p[1]/total*100)+'%</span></div>';
   });
   return h + '</div></div>';
 }
 
-function topParts(spendTags, total){
-  var parts = spendTags.slice(0, 6).map(function(p){ return [p[0], p[1]]; });
+function topParts(spendTags, total, rows){
+  var top = spendTags.slice(0, 6);
+  var parts = top.map(function(p){ return [p[0], p[1], rows]; });
+  var restNames = spendTags.slice(6).map(function(p){ return p[0]; });
   var rest = spendTags.slice(6).reduce(function(a,p){ return a + p[1]; }, 0);
-  if(rest > 0) parts.push(["Everything else", rest]);
+  if(rest > 0){
+    parts.push(["Everything else", rest,
+      rows.filter(function(e){ return restNames.indexOf(e.tag) > -1; })]);
+  }
   return parts;
 }
 
@@ -914,7 +1218,7 @@ function viewSnapshot(){
 
   if(!s.rows.length) return h + '<p class="empty">This snapshot has no entries in it.</p>';
 
-  h += donutHTML(topParts(s.spendTags, s.total), s.total);
+  h += donutHTML(topParts(s.spendTags, s.total, SNAP.entries), s.total, SNAP.entries);
   h += '<p class="small muted" style="margin:18px 0 10px">Tap a tag to see what it was made of.</p>';
 
   s.spendTags.forEach(function(p){
@@ -1120,6 +1424,108 @@ function shareSheet(rows, label){
   });
 }
 
+function applyParsed(r, source){
+  if(!r || r.amount === null){
+    state.readNote = "Couldn't find an amount in that " + source + ". Type it in yourself.";
+    state.candidates = null;
+    render();
+    return;
+  }
+  state.draft = {
+    amount: String(r.amount),
+    tag: r.tag,
+    subs: r.sub ? [r.sub] : [],
+    note: r.merchant || "",
+    date: todayISO(),
+    id: null
+  };
+  state.candidates = r.candidates.length > 1 ? r.candidates : null;
+  state.readNote = r.tag
+    ? "Read " + money(r.amount) + (r.merchant ? " to " + r.merchant : "") + ". Check it, then save."
+    : "Read " + money(r.amount) + (r.merchant ? " to " + r.merchant : "") + ". Pick a tag and save.";
+  state.tab = "add"; state.tagQuery = ""; state.flash = ""; state.undo = null;
+  render();
+}
+
+/* ---------------- OCR, loaded only when a picture turns up ---------------- */
+var ocrReady = null;
+function loadOCR(){
+  if(ocrReady) return ocrReady;
+  ocrReady = new Promise(function(resolve, reject){
+    var sc = document.createElement("script");
+    sc.src = "ocr/tesseract.min.js";
+    sc.onload = function(){ resolve(window.Tesseract); };
+    sc.onerror = function(){ reject(new Error("no ocr")); };
+    document.head.appendChild(sc);
+  });
+  return ocrReady;
+}
+
+function readImage(blob){
+  state.readNote = "Reading the screenshot\u2026 this takes a few seconds the first time.";
+  render();
+  loadOCR().then(function(T){
+    return T.recognize(blob, "eng", {
+      workerPath: "ocr/worker.min.js",
+      corePath: "ocr/",
+      langPath: "ocr/",
+      gzip: true
+    });
+  }).then(function(res){
+    var text = (res && res.data && res.data.text) || "";
+    var parsed = parsePayment(text);
+    if(parsed) parsed.merchant = parsed.merchant || "";
+    applyParsed(parsed, "screenshot");
+  }).catch(function(){
+    state.readNote = "Couldn't read that image. Try copying the text from it instead, "
+      + "or just type the amount.";
+    state.candidates = null;
+    render();
+  });
+}
+
+/* ---------------- donut hover ---------------- */
+function showTip(host, html, x, y){
+  var wrap = host.closest(".donutwrap"), tip = wrap && wrap.querySelector(".tip");
+  if(!tip) return;
+  tip.innerHTML = html;
+  tip.hidden = false;
+  var box = wrap.getBoundingClientRect();
+  var left = x - box.left + 14, top = y - box.top + 14;
+  if(left + tip.offsetWidth > wrap.offsetWidth) left = Math.max(0, wrap.offsetWidth - tip.offsetWidth);
+  if(top + tip.offsetHeight > wrap.offsetHeight + 40) top = Math.max(0, top - tip.offsetHeight - 26);
+  tip.style.left = left + "px";
+  tip.style.top = top + "px";
+  wrap.classList.add("dim");
+  var name = host.dataset.slicetag;
+  wrap.querySelectorAll(".slice").forEach(function(sl){
+    sl.classList.toggle("on", sl.dataset.slicetag === name);
+  });
+}
+function hideTip(host){
+  var wrap = host && host.closest(".donutwrap");
+  if(!wrap) return;
+  var tip = wrap.querySelector(".tip");
+  if(tip) tip.hidden = true;
+  wrap.classList.remove("dim");
+  wrap.querySelectorAll(".slice").forEach(function(sl){ sl.classList.remove("on"); });
+}
+
+document.addEventListener("mousemove", function(ev){
+  var host = ev.target.closest && ev.target.closest("[data-tip]");
+  if(host) showTip(host, host.dataset.tip, ev.clientX, ev.clientY);
+  else {
+    var open = document.querySelector(".donutwrap.dim");
+    if(open) hideTip(open.querySelector(".slice"));
+  }
+});
+document.addEventListener("focusin", function(ev){
+  var host = ev.target.closest && ev.target.closest("[data-tip]");
+  if(!host) return;
+  var b = host.getBoundingClientRect();
+  showTip(host, host.dataset.tip, b.left + b.width/2, b.top + b.height/2);
+});
+
 /* ---------------- events ---------------- */
 document.addEventListener("click", function(ev){
   var b;
@@ -1155,6 +1561,14 @@ document.addEventListener("click", function(ev){
   }
   if((b = ev.target.closest("[data-lm]"))){ state.ledgerMonth = b.dataset.lm; render(); return; }
   if((b = ev.target.closest("[data-sm]"))){ state.summaryMonth = b.dataset.sm; state.openTag = null; render(); return; }
+  if((b = ev.target.closest("[data-slicetag]"))){
+    var st = b.dataset.slicetag;
+    if(st !== "Everything else"){
+      state.openTag = state.openTag===st ? null : st;
+      render();
+    }
+    return;
+  }
   if((b = ev.target.closest("[data-expand]"))){
     state.openTag = state.openTag===b.dataset.expand ? null : b.dataset.expand;
     render(); return;
@@ -1185,9 +1599,33 @@ document.addEventListener("click", function(ev){
     state.tab = "add"; state.tagQuery = ""; state.flash = ""; state.undo = null;
     render(); return;
   }
+  if((b = ev.target.closest("[data-pickamt]"))){
+    state.draft.amount = b.dataset.pickamt;
+    state.readNote = "Amount set to " + money(+b.dataset.pickamt) + ".";
+    render(); return;
+  }
+  if(ev.target.closest("#pastePay")){
+    if(!navigator.clipboard || !navigator.clipboard.readText){
+      state.readNote = "This browser won't let a page read the clipboard. "
+        + "Long-press the amount box and paste there instead.";
+      render(); return;
+    }
+    navigator.clipboard.readText().then(function(t){
+      applyParsed(parsePayment(t), "message");
+    }).catch(function(){
+      state.readNote = "Clipboard access was refused. Paste into the amount box by hand.";
+      render();
+    });
+    return;
+  }
+  if(ev.target.closest("#pickShot")){
+    var fi = el("shotFile"); if(fi) fi.click();
+    return;
+  }
   if(ev.target.closest("#clearAll")){
     state.draft = { amount:"", tag:null, subs:[], note:"", date:todayISO(), id:null };
     state.tagQuery = ""; state.showAllTags = false; state.flash = ""; state.undo = null;
+    state.readNote = ""; state.candidates = null;
     render(); return;
   }
   if((b = ev.target.closest("[data-edit]"))){
@@ -1277,6 +1715,13 @@ document.addEventListener("click", function(ev){
   }
 });
 
+document.addEventListener("change", function(ev){
+  if(ev.target.id === "shotFile" && ev.target.files && ev.target.files[0]){
+    readImage(ev.target.files[0]);
+    ev.target.value = "";
+  }
+});
+
 document.addEventListener("input", function(ev){
   var t = ev.target;
   if(t.id==="amount"){
@@ -1304,6 +1749,31 @@ function syncSaveBtn(){
   btn.textContent = ok ? (d.id ? "Update this entry" : "Add " + money(amt) + " to " + d.tag)
                        : "Enter an amount and pick a tag";
 }
+
+function collectShare(){
+  if(!("caches" in window)) return;
+  caches.open("khata-share").then(function(c){
+    return Promise.all([c.match("shared-text"), c.match("shared-shot")]).then(function(r){
+      var textRes = r[0], shotRes = r[1];
+      var done = function(){
+        c.delete("shared-text"); c.delete("shared-shot");
+        history.replaceState({}, "", location.pathname);
+      };
+      if(shotRes){
+        return shotRes.blob().then(function(bl){ done(); readImage(bl); });
+      }
+      if(textRes){
+        return textRes.text().then(function(t){
+          done();
+          if(t && t.trim()) applyParsed(parsePayment(t), "message");
+        });
+      }
+      done();
+    });
+  }).catch(function(){});
+}
+
+if(location.search.indexOf("shared=1") > -1) setTimeout(collectShare, 0);
 
 if(location.hash.indexOf("#s=") === 0){
   try{
